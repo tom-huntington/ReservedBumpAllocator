@@ -109,8 +109,8 @@ pub const Parser = struct {
 
         var sub = self.makeSubParser(line, 2);
         const expr = try sub.parseExpr(0, null);
-        try self.symbols.put(name_tok.lexeme(self.source), .{ .expr = expr });
-        return .{ .name = name_tok.lexeme(self.source), .expr = expr };
+        try self.symbols.put(name_tok.lexeme, .{ .expr = expr });
+        return .{ .name = name_tok.lexeme, .expr = expr };
     }
 
     fn parseExprLine(self: *Parser, line: *const std.ArrayList(Token), end_tag: ?TokenTag) !*Expr {
@@ -168,7 +168,7 @@ const SubParser = struct {
         if (self.index >= self.line.items.len) return error.UnexpectedEof;
         const tok = self.line.items[self.index];
         self.index += 1;
-        const slice = tok.lexeme(self.parser.source);
+        const slice = tok.lexeme;
 
         switch (tok.tag) {
             .number => {
@@ -190,7 +190,7 @@ const SubParser = struct {
                 });
             },
             .ident => {
-                const name = tok.lexeme(self.parser.source);
+                const name = tok.lexeme;
                 const sym = self.parser.symbols.get(name) orelse return error.UnknownIdentifier;
                 return sym.expr;
             },
@@ -262,7 +262,7 @@ const SubParser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 const arity = if (left_func.arity == right_func.arity) left_func.arity else .dyad;
-                const op = parseCombinator(tok, self.parser.source) orelse return error.UnknownCombinator;
+                const op = parseCombinator(tok) orelse return error.UnknownCombinator;
                 return self.parser.allocExpr(.{
                     .func = .{ .arity = arity, .type = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
                 });
@@ -294,8 +294,8 @@ fn infixInfo(tag: TokenTag) ?InfixInfo {
     };
 }
 
-fn parseCombinator(tok: Token, source: []const u8) ?Combinator {
-    const ident = tok.lexeme(source);
+fn parseCombinator(tok: Token) ?Combinator {
+    const ident = tok.lexeme;
     const name = if (ident.len > 0 and (ident[0] == '(' or ident[0] == ')')) ident[1..] else ident;
     if (name.len == 0) return null;
     var out: [5]u8 = undefined;

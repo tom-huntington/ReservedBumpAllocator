@@ -33,52 +33,52 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
 
         switch (c) {
             ',' => {
-                try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '^' => {
-                try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '_' => {
-                try tokens.append(allocator, .{ .tag = .underscore, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .underscore, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '(' => {
                 if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
                     var j = i + 1;
                     while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
-                    try tokens.append(allocator, .{ .tag = .combinator, .start = start, .end = base + j });
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = start, .end = base + j, .lexeme = line[i..j] });
                     i = j;
                 } else {
-                    try tokens.append(allocator, .{ .tag = .lparen, .start = start, .end = start + 1 });
+                    try tokens.append(allocator, .{ .tag = .lparen, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                     i += 1;
                 }
             },
             ')' => {
-                try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 // `)name` denotes a combinator immediately after a closed scope.
                 // Emit both tokens so `)` can close a scope while `name` is parsed infix.
                 if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
                     var j = i + 1;
                     while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
-                    try tokens.append(allocator, .{ .tag = .combinator, .start = base + i + 1, .end = base + j });
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = base + i + 1, .end = base + j, .lexeme = line[i + 1 .. j] });
                     i = j;
                 } else {
                     i += 1;
                 }
             },
             '{' => {
-                try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '}' => {
-                try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '|' => {
                 if (i + 1 < line.len and line[i + 1] == '>') {
-                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2 });
+                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
                     i += 2;
                 } else {
                     return error.UnexpectedChar;
@@ -86,25 +86,25 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
             },
             '\\' => {
                 if (i + 1 < line.len and line[i + 1] == '\\') {
-                    try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2 });
+                    try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
                     i += 2;
                 } else {
-                    try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1 });
+                    try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                     i += 1;
                 }
             },
             '=' => {
-                try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1 });
+                try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
             '$' => {
                 // Raw string literal: consume rest of line.
-                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len });
+                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len, .lexeme = line[i..] });
                 break;
             },
             '@' => {
                 if (i + 1 >= line.len) return error.UnexpectedChar;
-                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2 });
+                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
                 i += 2;
             },
             else => {
@@ -115,7 +115,7 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                         j += 1;
                         if (j >= line.len or !std.ascii.isDigit(line[j])) return error.InvalidNumber;
                         while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
-                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j });
+                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j, .lexeme = line[i..j] });
                         i = j;
                     } else {
                         return error.InvalidNumber;
@@ -123,7 +123,7 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                 } else if (std.ascii.isAlphabetic(c)) {
                     var j = i;
                     while (j < line.len and std.ascii.isAlphabetic(line[j])) : (j += 1) {}
-                    try tokens.append(allocator, .{ .tag = .ident, .start = start, .end = base + j });
+                    try tokens.append(allocator, .{ .tag = .ident, .start = start, .end = base + j, .lexeme = line[i..j] });
                     i = j;
                 } else {
                     return error.UnexpectedChar;

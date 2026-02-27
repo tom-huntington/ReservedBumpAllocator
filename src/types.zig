@@ -23,10 +23,7 @@ pub const Token = struct {
     tag: TokenTag,
     start: usize,
     end: usize,
-
-    pub fn lexeme(self: Token, source: []const u8) []const u8 {
-        return source[self.start..self.end];
-    }
+    lexeme: []const u8,
 };
 
 pub const Arity = enum { value, monad, dyad };

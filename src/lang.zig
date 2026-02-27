@@ -53,6 +53,7 @@ pub const Expr = union(enum) {
         prefix: struct { op: TokenTag, right: *Expr },
         combinator: struct { op: Combinator, left: *Expr, right: *Expr },
         partial_apply: struct { op: PartialApply, left: *Expr, right: *Expr },
+        scope: struct { *Expr },
         builtin: union(enum) { monad: MonadFn, dyad: DyadFn },
     };
 };
@@ -98,10 +99,9 @@ pub const Token = struct {
     tag: TokenTag,
     start: usize,
     end: usize,
-    source: []const u8,
 
-    pub fn lexeme(self: Token) []const u8 {
-        return self.source;
+    pub fn lexeme(self: Token, source: []const u8) []const u8 {
+        return source[self.start..self.end];
     }
 };
 
@@ -119,14 +119,14 @@ pub fn lex(allocator: std.mem.Allocator, source: []const u8) !std.ArrayList(std.
         var tokens: std.ArrayList(Token) = .empty;
         // missing `defer list.deinit(gpa);`
         //try list.append(gpa, '☔');
-        try lexLine(allocator, &tokens, source, line, offset);
+        try lexLine(allocator, &tokens, line, offset);
         try lines.append(allocator, tokens);
         offset += line.len + 1;
     }
     return lines;
 }
 
-fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), source: []const u8, line: []const u8, base: usize) !void {
+fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []const u8, base: usize) !void {
     var i: usize = 0;
     while (i < line.len) {
         const c = line[i];
@@ -139,43 +139,43 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), source: 
 
         switch (c) {
             ',' => {
-                try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1 });
                 i += 1;
             },
             '^' => {
-                try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1 });
                 i += 1;
             },
             '_' => {
-                try tokens.append(allocator, .{ .tag = .underscore, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .underscore, .start = start, .end = start + 1 });
                 i += 1;
             },
             '(' => {
                 if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
                     var j = i + 1;
                     while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
-                    try tokens.append(allocator, .{ .tag = .combinator, .start = start, .end = base + j, .source = source[start .. base + j] });
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = start, .end = base + j });
                     i = j;
                 } else {
-                    try tokens.append(allocator, .{ .tag = .lparen, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                    try tokens.append(allocator, .{ .tag = .lparen, .start = start, .end = start + 1 });
                     i += 1;
                 }
             },
             ')' => {
-                try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1 });
                 i += 1;
             },
             '{' => {
-                try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1 });
                 i += 1;
             },
             '}' => {
-                try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1 });
                 i += 1;
             },
             '|' => {
                 if (i + 1 < line.len and line[i + 1] == '>') {
-                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2, .source = source[start .. start + 2] });
+                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2 });
                     i += 2;
                 } else {
                     return error.UnexpectedChar;
@@ -183,25 +183,25 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), source: 
             },
             '\\' => {
                 if (i + 1 < line.len and line[i + 1] == '\\') {
-                    try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2, .source = source[start .. start + 2] });
+                    try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2 });
                     i += 2;
                 } else {
-                    try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                    try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1 });
                     i += 1;
                 }
             },
             '=' => {
-                try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1, .source = source[start .. start + 1] });
+                try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1 });
                 i += 1;
             },
             '$' => {
                 // Raw string literal: consume rest of line.
-                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len, .source = source[start .. start + line.len] });
+                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len });
                 break;
             },
             '@' => {
                 if (i + 1 >= line.len) return error.UnexpectedChar;
-                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2, .source = source[start .. start + 2] });
+                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2 });
                 i += 2;
             },
             else => {
@@ -212,7 +212,7 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), source: 
                         j += 1;
                         if (j >= line.len or !std.ascii.isDigit(line[j])) return error.InvalidNumber;
                         while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
-                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j, .source = source[start .. base + j] });
+                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j });
                         i = j;
                     } else {
                         return error.InvalidNumber;
@@ -220,7 +220,7 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), source: 
                 } else if (std.ascii.isAlphabetic(c)) {
                     var j = i;
                     while (j < line.len and std.ascii.isAlphabetic(line[j])) : (j += 1) {}
-                    try tokens.append(allocator, .{ .tag = .ident, .start = start, .end = base + j, .source = source[start .. base + j] });
+                    try tokens.append(allocator, .{ .tag = .ident, .start = start, .end = base + j });
                     i = j;
                 } else {
                     return error.UnexpectedChar;
@@ -318,8 +318,8 @@ pub const Parser = struct {
 
         var sub = self.makeSubParser(line, 2);
         const expr = try sub.parseExpr(0, null);
-        try self.symbols.put(name_tok.lexeme(), .{ .expr = expr });
-        return .{ .name = name_tok.lexeme(), .expr = expr };
+        try self.symbols.put(name_tok.lexeme(self.source), .{ .expr = expr });
+        return .{ .name = name_tok.lexeme(self.source), .expr = expr };
     }
 
     fn parseExprLine(self: *Parser, line: *const std.ArrayList(Token), end_tag: ?TokenTag) !*Expr {
@@ -380,14 +380,14 @@ const SubParser = struct {
 
         switch (tok.tag) {
             .number => {
-                const slice = tok.lexeme();
+                const slice = tok.lexeme(self.parser.source);
                 const val = try std.fmt.parseFloat(f64, slice);
                 return self.parser.allocExpr(.{
                     .value = .{ .node = .{ .literal = .{ .scalar = .{ .value = val, .is_char = false } } } },
                 });
             },
             .char_lit => {
-                const slice = tok.lexeme();
+                const slice = tok.lexeme(self.parser.source);
                 const ch = slice[1];
                 return self.parser.allocExpr(.{
                     .value = .{ .node = .{ .literal = .{ .scalar = .{ .value = @floatFromInt(ch), .is_char = true } } } },
@@ -400,7 +400,7 @@ const SubParser = struct {
                 });
             },
             .ident => {
-                const name = tok.lexeme();
+                const name = tok.lexeme(self.parser.source);
                 const sym = self.parser.symbols.get(name) orelse return error.UnknownIdentifier;
                 return sym.expr;
             },
@@ -410,9 +410,8 @@ const SubParser = struct {
                     return error.MissingRightParen;
                 }
                 self.index += 1;
-                _ = body;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .monad, .node = .{ .builtin = .{ .monad = builtinStubMonad } } },
+                    .func = .{ .arity = .monad, .node = .{ .scope = .{body} } },
                 });
             },
             .lbrace => {
@@ -421,9 +420,8 @@ const SubParser = struct {
                     return error.MissingRightBrace;
                 }
                 self.index += 1;
-                _ = body;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .dyad, .node = .{ .builtin = .{ .dyad = builtinStubDyad } } },
+                    .func = .{ .arity = .dyad, .node = .{ .scope = .{body} } },
                 });
             },
             .backslash => {
@@ -476,7 +474,7 @@ const SubParser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 const arity = if (left_func.arity == right_func.arity) left_func.arity else .dyad;
-                const op = parseCombinator(tok) orelse return error.UnknownCombinator;
+                const op = parseCombinator(tok, self.parser.source) orelse return error.UnknownCombinator;
                 return self.parser.allocExpr(.{
                     .func = .{ .arity = arity, .node = .{ .combinator = .{ .op = op, .left = left, .right = right } } },
                 });
@@ -508,8 +506,8 @@ fn infixInfo(tag: TokenTag) ?InfixInfo {
     };
 }
 
-fn parseCombinator(tok: Token) ?Combinator {
-    const ident = tok.lexeme();
+fn parseCombinator(tok: Token, source: []const u8) ?Combinator {
+    const ident = tok.lexeme(source);
     if (ident.len < 2 or ident[0] != '(') return null;
     const name = ident[1..];
 

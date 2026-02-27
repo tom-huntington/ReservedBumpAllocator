@@ -16,7 +16,14 @@ pub fn main() !void {
     const source = "( add )b mul )";
 
     var lines = try quiver.lang.lex(allocator, source);
-    std.debug.print("lines: {}\n", .{lines});
+    for (lines.items) |line| {
+        for (line.items) |tok|
+            std.debug.print(", {{ .tag={} .text='{s}' }}", .{ tok.tag, source[tok.start..tok.end] });
+
+        std.debug.print("\n", .{});
+    }
+    //var string: std.io.Writer.Allocating = .init(allocator);
+    //try string.writer.print("{f}", .{std.json.fmt(lines, .{})});
 
     defer {
         for (lines.items) |*line| line.deinit(allocator);

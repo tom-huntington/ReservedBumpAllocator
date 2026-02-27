@@ -1,5 +1,7 @@
 const std = @import("std");
 const quiver = @import("quiver");
+const stringprint = @import("stringprint.zig");
+const lexparse = quiver.lexparse;
 
 pub const std_options: std.Options = .{
     .fmt_max_depth = 64, // Default is usually 16
@@ -16,13 +18,14 @@ pub fn main() !void {
     const source = "( add )b sq )";
     std.debug.print("soure: {s}\n", .{source});
 
-    var lines = try quiver.lang.lex(allocator, source);
-    for (lines.items) |line| {
-        for (line.items) |tok|
-            std.debug.print(", {{ .tag={} .text='{s}' }}", .{ tok.tag, source[tok.start..tok.end] });
+    var lines = try lexparse.lex(allocator, source);
+    stringprint.printfmt("lines: {}\n", .{lines});
+    // for (lines.items) |line| {
+    //     for (line.items) |tok|
+    //         std.debug.print(", {{ .tag={} .text='{s}' }}", .{ tok.tag, source[tok.start..tok.end] });
 
-        std.debug.print("\n", .{});
-    }
+    //     std.debug.print("\n", .{});
+    // }
     //var string: std.io.Writer.Allocating = .init(allocator);
     //try string.writer.print("{f}", .{std.json.fmt(lines, .{})});
 
@@ -31,17 +34,9 @@ pub fn main() !void {
         lines.deinit(allocator);
     }
 
-    var parser = quiver.lang.Parser.init(ast_alloc, source, lines.items);
+    var parser = lexparse.Parser.init(ast_alloc, source, lines.items);
     defer parser.deinit();
     const file_ast = try parser.parseFile(ast_alloc);
 
-    const main_arity = switch (file_ast.main.*) {
-        .func => |f| @tagName(f.arity),
-        .value => "value",
-    };
-    std.debug.print("Parsed {d} constants; main arity: {s}\n{any}\n", .{
-        file_ast.consts.len,
-        main_arity,
-        file_ast.main,
-    });
+    stringprint.printfmt("main: {}\n", .{file_ast.main});
 }

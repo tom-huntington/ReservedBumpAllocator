@@ -1,2 +1,3 @@
 //! Quiver language core.
-pub const lang = @import("lang.zig");
+pub const lexparse = @import("lexparse.zig");
+pub const builtins = @import("builtins.zig");

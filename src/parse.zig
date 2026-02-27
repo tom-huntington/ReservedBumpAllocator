@@ -15,7 +15,7 @@ pub const ConstDef = struct {
 
 pub const FileAst = struct {
     consts: []ConstDef,
-    main: *Expr,
+    main: *Expr.FuncExpr,
 };
 
 pub const Symbol = struct {
@@ -69,7 +69,7 @@ pub const Parser = struct {
                 if (main_expr.* != .func) return error.MainMustBeFunction;
                 return FileAst{
                     .consts = try consts.toOwnedSlice(allocator),
-                    .main = main_expr,
+                    .main = &main_expr.func,
                 };
             }
         }

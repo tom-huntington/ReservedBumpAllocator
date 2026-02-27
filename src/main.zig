@@ -13,20 +13,10 @@ pub fn main() !void {
     defer arena.deinit();
     const ast_alloc = arena.allocator();
 
-    // No fixed buffer size needed
-    const data = try std.fs.File.stdin().readToEndAlloc(allocator, 1 << 26); // 64 MiB limit
-    defer allocator.free(data);
-
-    // Now do something with the whole input
-    // std.debug.print("Read {d} bytes from stdin\n", .{data.len});
-    // for (data) |c|
-    //     std.debug.print("0x{x}\n", .{c});
-
-    const source = data;
+    const source = "( add )b mul )";
 
     var lines = try quiver.lang.lex(allocator, source);
-    // for (lines.items) |line|
-    //     std.debug.print("line: {}\n", .{line});
+    std.debug.print("lines: {}\n", .{lines});
 
     defer {
         for (lines.items) |*line| line.deinit(allocator);

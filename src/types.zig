@@ -61,21 +61,21 @@ pub const Combinator = enum {
 pub const PartialApply = enum { comma, caret };
 
 pub const Expr = union(enum) {
-    value: ValueUnion,
-    func: FuncUnion,
+    value: ValueExpr,
+    func: FuncExpr,
 
-    pub const FuncUnion = struct {
+    pub const FuncExpr = struct {
         arity: Arity,
         type: union(enum) {
-            combinator: struct { op: Combinator, left: *FuncUnion, right: *FuncUnion },
-            partial_apply: struct { op: PartialApply, left: *FuncUnion, right: *FuncUnion },
-            scope: *FuncUnion,
-            userFn: *FuncUnion,
+            combinator: struct { op: Combinator, left: *FuncExpr, right: *FuncExpr },
+            partial_apply: struct { op: PartialApply, left: *FuncExpr, right: *FuncExpr },
+            scope: *FuncExpr,
+            userFn: *FuncExpr,
             builtin: union(enum) { monad: MonadFn, dyad: DyadFn },
         },
     };
 
-    pub const ValueUnion = union(enum) {
+    pub const ValueExpr = union(enum) {
         literal: Value,
         strand: struct { left: *Expr, right: *Expr },
         apply_rev: struct { func: *Expr, arg: *Expr },

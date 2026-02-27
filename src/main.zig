@@ -3,6 +3,8 @@ const quiver = @import("quiver");
 const stringprint = @import("stringprint.zig");
 const parse = @import("parse.zig");
 const lex = @import("lex.zig");
+const eval = @import("eval.zig");
+const types = @import("types.zig");
 
 pub const std_options: std.Options = .{
     .fmt_max_depth = 64, // Default is usually 16
@@ -16,7 +18,7 @@ pub fn main() !void {
     defer arena.deinit();
     const ast_alloc = arena.allocator();
 
-    const source = "( add )b sq )";
+    const source = "add";
     std.debug.print("soure: {s}\n", .{source});
 
     var lines = try lex.lex(allocator, source);
@@ -29,7 +31,14 @@ pub fn main() !void {
 
     var parser = parse.Parser.init(ast_alloc, source, lines.items);
     defer parser.deinit();
-    const file_ast = try parser.parseFile(ast_alloc);
+    const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
 
     stringprint.printfmt("main: {}\n", .{file_ast.main});
+
+    const args = [_]types.Value{
+        .{ .scalar = .{ .value = 2, .is_char = false } },
+        .{ .scalar = .{ .value = 3, .is_char = false } },
+    };
+    const result = try eval.evalMain(ast_alloc, &args, file_ast.main);
+    stringprint.printfmt("result: {}\n", .{result});
 }

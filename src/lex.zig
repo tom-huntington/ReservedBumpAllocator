@@ -1,0 +1,134 @@
+const std = @import("std");
+const types = @import("types.zig");
+const Token = types.Token;
+
+pub fn lex(allocator: std.mem.Allocator, source: []const u8) !std.ArrayList(std.ArrayList(Token)) {
+    var lines = try std.ArrayList(std.ArrayList(Token)).initCapacity(allocator, 0);
+    errdefer {
+        for (lines.items) |*line| line.deinit(allocator);
+        lines.deinit(allocator);
+    }
+
+    var it = std.mem.splitScalar(u8, source, '\n');
+    var offset: usize = 0;
+    while (it.next()) |line| {
+        var tokens: std.ArrayList(Token) = .empty;
+        try lexLine(allocator, &tokens, line, offset);
+        try lines.append(allocator, tokens);
+        offset += line.len + 1;
+    }
+    return lines;
+}
+
+fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []const u8, base: usize) !void {
+    var i: usize = 0;
+    while (i < line.len) {
+        const c = line[i];
+        if (std.ascii.isWhitespace(c)) {
+            i += 1;
+            continue;
+        }
+
+        const start = base + i;
+
+        switch (c) {
+            ',' => {
+                try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '^' => {
+                try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '_' => {
+                try tokens.append(allocator, .{ .tag = .underscore, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '(' => {
+                if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
+                    var j = i + 1;
+                    while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = start, .end = base + j });
+                    i = j;
+                } else {
+                    try tokens.append(allocator, .{ .tag = .lparen, .start = start, .end = start + 1 });
+                    i += 1;
+                }
+            },
+            ')' => {
+                try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1 });
+                // `)name` denotes a combinator immediately after a closed scope.
+                // Emit both tokens so `)` can close a scope while `name` is parsed infix.
+                if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
+                    var j = i + 1;
+                    while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = base + i + 1, .end = base + j });
+                    i = j;
+                } else {
+                    i += 1;
+                }
+            },
+            '{' => {
+                try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '}' => {
+                try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '|' => {
+                if (i + 1 < line.len and line[i + 1] == '>') {
+                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2 });
+                    i += 2;
+                } else {
+                    return error.UnexpectedChar;
+                }
+            },
+            '\\' => {
+                if (i + 1 < line.len and line[i + 1] == '\\') {
+                    try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2 });
+                    i += 2;
+                } else {
+                    try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1 });
+                    i += 1;
+                }
+            },
+            '=' => {
+                try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1 });
+                i += 1;
+            },
+            '$' => {
+                // Raw string literal: consume rest of line.
+                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len });
+                break;
+            },
+            '@' => {
+                if (i + 1 >= line.len) return error.UnexpectedChar;
+                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2 });
+                i += 2;
+            },
+            else => {
+                if (std.ascii.isDigit(c)) {
+                    var j = i;
+                    while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
+                    if (j < line.len and line[j] == '.') {
+                        j += 1;
+                        if (j >= line.len or !std.ascii.isDigit(line[j])) return error.InvalidNumber;
+                        while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
+                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j });
+                        i = j;
+                    } else {
+                        return error.InvalidNumber;
+                    }
+                } else if (std.ascii.isAlphabetic(c)) {
+                    var j = i;
+                    while (j < line.len and std.ascii.isAlphabetic(line[j])) : (j += 1) {}
+                    try tokens.append(allocator, .{ .tag = .ident, .start = start, .end = base + j });
+                    i = j;
+                } else {
+                    return error.UnexpectedChar;
+                }
+            },
+        }
+    }
+}

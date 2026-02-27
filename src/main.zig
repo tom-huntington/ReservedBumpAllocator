@@ -13,7 +13,8 @@ pub fn main() !void {
     defer arena.deinit();
     const ast_alloc = arena.allocator();
 
-    const source = "( add )b mul )";
+    const source = "( add )b sq )";
+    std.debug.print("soure: {s}\n", .{source});
 
     var lines = try quiver.lang.lex(allocator, source);
     for (lines.items) |line| {

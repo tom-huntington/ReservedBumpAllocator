@@ -36,7 +36,7 @@ pub const Expr = union(enum) {
 
     pub const FuncUnion = struct {
         arity: Arity,
-        union_: union(enum) {
+        type: union(enum) {
             //prefix: struct { op: TokenTag, right: *Expr },
             combinator: struct { op: Combinator, left: *FuncUnion, right: *FuncUnion },
             partial_apply: struct { op: PartialApply, left: *FuncUnion, right: *FuncUnion },
@@ -157,7 +157,16 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
             },
             ')' => {
                 try tokens.append(allocator, .{ .tag = .rparen, .start = start, .end = start + 1 });
-                i += 1;
+                // `)name` denotes a combinator immediately after a closed scope.
+                // Emit both tokens so `)` can close a scope while `name` is parsed infix.
+                if (i + 1 < line.len and std.ascii.isAlphabetic(line[i + 1])) {
+                    var j = i + 1;
+                    while (j < line.len and std.ascii.isAlphanumeric(line[j])) : (j += 1) {}
+                    try tokens.append(allocator, .{ .tag = .combinator, .start = base + i + 1, .end = base + j });
+                    i = j;
+                } else {
+                    i += 1;
+                }
             },
             '{' => {
                 try tokens.append(allocator, .{ .tag = .lbrace, .start = start, .end = start + 1 });
@@ -283,14 +292,18 @@ pub const Parser = struct {
 
     fn installBuiltins(self: *Parser) !void {
         const add_expr = try self.allocExpr(.{
-            .func = .{ .arity = .dyad, .union_ = .{ .builtin = .{ .dyad = builtinStubDyad } } },
+            .func = .{ .arity = .dyad, .type = .{ .builtin = .{ .dyad = builtinStubDyad } } },
         });
         try self.symbols.put("add", .{ .expr = add_expr });
 
         const mult_expr = try self.allocExpr(.{
-            .func = .{ .arity = .dyad, .union_ = .{ .builtin = .{ .dyad = builtinStubDyad } } },
+            .func = .{ .arity = .dyad, .type = .{ .builtin = .{ .dyad = builtinStubDyad } } },
         });
         try self.symbols.put("mult", .{ .expr = mult_expr });
+        const sq_expr = try self.allocExpr(.{
+            .func = .{ .arity = .monad, .type = .{ .builtin = .{ .monad = builtinStubMonad } } },
+        });
+        try self.symbols.put("sq", .{ .expr = sq_expr });
 
         const inf_expr = try self.allocExpr(.{
             .value = .{ .literal = .{ .scalar = .{ .value = std.math.inf(f64), .is_char = false } } },
@@ -405,7 +418,7 @@ const SubParser = struct {
                 }
                 self.index += 1;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .monad, .union_ = .{ .scope = &body.func } },
+                    .func = .{ .arity = .monad, .type = .{ .scope = &body.func } },
                 });
             },
             .lbrace => {
@@ -415,21 +428,21 @@ const SubParser = struct {
                 }
                 self.index += 1;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .dyad, .union_ = .{ .scope = .{body} } },
+                    .func = .{ .arity = .dyad, .type = .{ .scope = &body.func } },
                 });
             },
             .backslash => {
                 const body = try self.parseExpr(0, end_tag);
                 _ = body;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .monad, .union_ = .{ .builtin = .{ .monad = builtinStubMonad } } },
+                    .func = .{ .arity = .monad, .type = .{ .builtin = .{ .monad = builtinStubMonad } } },
                 });
             },
             .dbl_backslash => {
                 const body = try self.parseExpr(0, end_tag);
                 _ = body;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = .dyad, .union_ = .{ .builtin = .{ .dyad = builtinStubDyad } } },
+                    .func = .{ .arity = .dyad, .type = .{ .builtin = .{ .dyad = builtinStubDyad } } },
                 });
             },
             else => return error.UnexpectedToken,
@@ -444,7 +457,7 @@ const SubParser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = left_func.arity, .union_ = .{ .partial_apply = .{ .op = .comma, .left = &left.func, .right = &right.func } } },
+                    .func = .{ .arity = left_func.arity, .type = .{ .partial_apply = .{ .op = .comma, .left = &left.func, .right = &right.func } } },
                 });
             },
             .underscore => {
@@ -470,7 +483,7 @@ const SubParser = struct {
                 const arity = if (left_func.arity == right_func.arity) left_func.arity else .dyad;
                 const op = parseCombinator(tok, self.parser.source) orelse return error.UnknownCombinator;
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = arity, .union_ = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
+                    .func = .{ .arity = arity, .type = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
                 });
             },
             .caret => {
@@ -479,7 +492,7 @@ const SubParser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 return self.parser.allocExpr(.{
-                    .func = .{ .arity = left_func.arity, .union_ = .{ .partial_apply = .{ .op = .caret, .left = &left.func, .right = &right.func } } },
+                    .func = .{ .arity = left_func.arity, .type = .{ .partial_apply = .{ .op = .caret, .left = &left.func, .right = &right.func } } },
                 });
             },
             else => return error.UnexpectedToken,
@@ -502,8 +515,8 @@ fn infixInfo(tag: TokenTag) ?InfixInfo {
 
 fn parseCombinator(tok: Token, source: []const u8) ?Combinator {
     const ident = tok.lexeme(source);
-    if (ident.len < 2 or ident[0] != '(') return null;
-    const name = ident[1..];
+    const name = if (ident.len > 0 and (ident[0] == '(' or ident[0] == ')')) ident[1..] else ident;
+    if (name.len == 0) return null;
 
     if (std.ascii.eqlIgnoreCase(name, "b")) return .B;
     if (std.ascii.eqlIgnoreCase(name, "b1")) return .B1;

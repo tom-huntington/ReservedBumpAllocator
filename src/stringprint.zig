@@ -508,10 +508,10 @@ pub fn printValue(
             .slice => {
                 if (!is_any)
                     @compileError("cannot format slice without a specifier (i.e. {s}, {x}, {b64}, or {any})");
-                // if (ptr_info.child == u8) {
-                //     const str: []const u8 = value;
-                //     return w.alignBufferOptions(str, options);
-                // }
+                if (ptr_info.child == u8) {
+                    const str: []const u8 = value;
+                    return w.alignBufferOptions(str, options);
+                }
                 if (max_depth == 0) return w.writeAll("{ ... }");
                 try w.writeAll("{ ");
                 for (value, 0..) |elem, i| {

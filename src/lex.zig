@@ -24,9 +24,12 @@ pub fn lex(allocator: std.mem.Allocator, source: []const u8) !LexResult {
     var it = std.mem.splitScalar(u8, source, '\n');
     var offset: usize = 0;
     while (it.next()) |line| {
-        try lexLine(allocator, &tokens, line, offset);
+        const has_newline = offset + line.len < source.len and source[offset + line.len] == '\n';
+        const line_end = offset + line.len + @intFromBool(has_newline);
+        const full_line = source[offset..line_end];
+        try lexLine(allocator, &tokens, full_line, offset);
         try line_offsets.append(allocator, @intCast(tokens.items.len));
-        offset += line.len + 1;
+        offset = line_end;
     }
 
     return .{
@@ -115,8 +118,9 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                 i += 1;
             },
             '$' => {
-                // Raw string literal: consume rest of line.
-                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + line.len, .lexeme = line[i..] });
+                // Raw string literal: consume rest of line, excluding the line delimiter.
+                const raw_end = if (line.len > i and line[line.len - 1] == '\n') line.len - 1 else line.len;
+                try tokens.append(allocator, .{ .tag = .raw_string, .start = start, .end = base + raw_end, .lexeme = line[i..raw_end] });
                 break;
             },
             '@' => {

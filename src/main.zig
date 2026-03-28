@@ -24,7 +24,10 @@ pub fn main() !void {
     const a = wrap{ .v = "hello" };
     stringprint.printfmt("a: {}\n", .{a});
 
-    const source = "add )b1 sq";
+    const source = 
+        \\ add
+        \\ )b1 sq
+    ;
     std.debug.print("soure: {s}\n", .{source});
 
     var lexed = try lex.lex(allocator, source);

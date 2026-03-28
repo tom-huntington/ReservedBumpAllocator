@@ -2,22 +2,37 @@ const std = @import("std");
 const types = @import("types.zig");
 const Token = types.Token;
 
-pub fn lex(allocator: std.mem.Allocator, source: []const u8) !std.ArrayList(std.ArrayList(Token)) {
-    var lines = try std.ArrayList(std.ArrayList(Token)).initCapacity(allocator, 0);
-    errdefer {
-        for (lines.items) |*line| line.deinit(allocator);
-        lines.deinit(allocator);
+pub const LexResult = struct {
+    tokens: std.ArrayList(Token),
+    line_offsets: std.ArrayList(u32),
+
+    pub fn deinit(self: *LexResult, allocator: std.mem.Allocator) void {
+        self.tokens.deinit(allocator);
+        self.line_offsets.deinit(allocator);
     }
+};
+
+pub fn lex(allocator: std.mem.Allocator, source: []const u8) !LexResult {
+    var tokens: std.ArrayList(Token) = .empty;
+    errdefer tokens.deinit(allocator);
+
+    var line_offsets: std.ArrayList(u32) = .empty;
+    errdefer line_offsets.deinit(allocator);
+
+    try line_offsets.append(allocator, 0);
 
     var it = std.mem.splitScalar(u8, source, '\n');
     var offset: usize = 0;
     while (it.next()) |line| {
-        var tokens: std.ArrayList(Token) = .empty;
         try lexLine(allocator, &tokens, line, offset);
-        try lines.append(allocator, tokens);
+        try line_offsets.append(allocator, @intCast(tokens.items.len));
         offset += line.len + 1;
     }
-    return lines;
+
+    return .{
+        .tokens = tokens,
+        .line_offsets = line_offsets,
+    };
 }
 
 fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []const u8, base: usize) !void {

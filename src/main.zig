@@ -27,15 +27,13 @@ pub fn main() !void {
     const source = "add )b1 sq";
     std.debug.print("soure: {s}\n", .{source});
 
-    var lines = try lex.lex(allocator, source);
-    stringprint.printfmt("lines: {}\n", .{lines});
+    var lexed = try lex.lex(allocator, source);
+    stringprint.printfmt("tokens: {}\n", .{lexed.tokens});
+    stringprint.printfmt("line_offsets: {}\n", .{lexed.line_offsets});
 
-    defer {
-        for (lines.items) |*line| line.deinit(allocator);
-        lines.deinit(allocator);
-    }
+    defer lexed.deinit(allocator);
 
-    var parser = parse.Parser.init(ast_alloc, source, lines.items);
+    var parser = parse.Parser.init(ast_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
     const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
 

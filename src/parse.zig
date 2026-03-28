@@ -25,15 +25,17 @@ pub const Symbol = struct {
 pub const Parser = struct {
     allocator: std.mem.Allocator,
     source: []const u8,
-    lines: []std.ArrayList(Token),
+    tokens: []const Token,
+    line_offsets: []const u32,
     symbols: std.StringHashMap(Symbol),
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8, lines: []std.ArrayList(Token)) Parser {
+    pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: []const Token, line_offsets: []const u32) Parser {
         const symbols = std.StringHashMap(Symbol).init(allocator);
         return .{
             .allocator = allocator,
             .source = source,
-            .lines = lines,
+            .tokens = tokens,
+            .line_offsets = line_offsets,
             .symbols = symbols,
         };
     }
@@ -49,14 +51,14 @@ pub const Parser = struct {
         errdefer consts.deinit(allocator);
 
         var last_nonempty: ?usize = null;
-        for (self.lines, 0..) |line, i| {
-            if (hasNonWhitespaceTokens(&line)) last_nonempty = i;
+        for (0..self.lineCount()) |i| {
+            if (hasNonWhitespaceTokens(self.lineTokens(i))) last_nonempty = i;
         }
         if (last_nonempty == null) return error.MissingMain;
 
         var line_index: usize = 0;
-        while (line_index < self.lines.len) : (line_index += 1) {
-            const line = &self.lines[line_index];
+        while (line_index < self.lineCount()) : (line_index += 1) {
+            const line = self.lineTokens(line_index);
             if (!hasNonWhitespaceTokens(line)) continue;
 
             const is_last = line_index == last_nonempty.?;
@@ -73,6 +75,16 @@ pub const Parser = struct {
             }
         }
         return error.MissingMain;
+    }
+
+    fn lineCount(self: *const Parser) usize {
+        return if (self.line_offsets.len == 0) 0 else self.line_offsets.len - 1;
+    }
+
+    fn lineTokens(self: *const Parser, line_index: usize) []const Token {
+        const start = self.line_offsets[line_index];
+        const end = self.line_offsets[line_index + 1];
+        return self.tokens[start..end];
     }
 
     pub fn populateBuiltins(self: *Parser) !void {
@@ -100,7 +112,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseConst(self: *Parser, line: *const std.ArrayList(Token)) !ConstDef {
+    fn parseConst(self: *Parser, line: []const Token) !ConstDef {
         var name_index: usize = 0;
         const name_tok = nextNonWhitespaceToken(line, &name_index) orelse return error.InvalidConst;
         if (name_tok.tag != .ident) return error.InvalidConst;
@@ -114,12 +126,12 @@ pub const Parser = struct {
         return .{ .name = name_tok.lexeme, .expr = expr };
     }
 
-    fn parseExprLine(self: *Parser, line: *const std.ArrayList(Token), end_tag: ?TokenTag) !*Expr {
+    fn parseExprLine(self: *Parser, line: []const Token, end_tag: ?TokenTag) !*Expr {
         var sub = self.makeSubParser(line, 0);
         return sub.parseExpr(0, end_tag);
     }
 
-    fn makeSubParser(self: *Parser, line: *const std.ArrayList(Token), start_index: usize) SubParser {
+    fn makeSubParser(self: *Parser, line: []const Token, start_index: usize) SubParser {
         return .{ .parser = self, .line = line, .index = start_index };
     }
 
@@ -132,16 +144,16 @@ pub const Parser = struct {
 
 const SubParser = struct {
     parser: *Parser,
-    line: *const std.ArrayList(Token),
+    line: []const Token,
     index: usize,
 
     fn parseExpr(self: *SubParser, min_bp: u8, end_tag: ?TokenTag) !*Expr {
         var left = try self.parsePrefix(end_tag);
 
-        while (self.index < self.line.items.len) {
+        while (self.index < self.line.len) {
             self.skipWhitespace();
-            if (self.index >= self.line.items.len) break;
-            const tok = self.line.items[self.index];
+            if (self.index >= self.line.len) break;
+            const tok = self.line[self.index];
             if (end_tag) |tag| {
                 if (tok.tag == tag) break;
             }
@@ -169,8 +181,8 @@ const SubParser = struct {
 
     fn parsePrefix(self: *SubParser, end_tag: ?TokenTag) (SubParserError || std.fmt.ParseFloatError || std.mem.Allocator.Error)!*Expr {
         self.skipWhitespace();
-        if (self.index >= self.line.items.len) return error.UnexpectedEof;
-        const tok = self.line.items[self.index];
+        if (self.index >= self.line.len) return error.UnexpectedEof;
+        const tok = self.line[self.index];
         self.index += 1;
         const slice = tok.lexeme;
 
@@ -201,7 +213,7 @@ const SubParser = struct {
             .lparen => {
                 const body = try self.parseExpr(0, .rparen);
                 self.skipWhitespace();
-                if (self.index >= self.line.items.len or self.line.items[self.index].tag != .rparen) {
+                if (self.index >= self.line.len or self.line[self.index].tag != .rparen) {
                     return error.MissingRightParen;
                 }
                 self.index += 1;
@@ -212,7 +224,7 @@ const SubParser = struct {
             .lbrace => {
                 const body = try self.parseExpr(0, .rbrace);
                 self.skipWhitespace();
-                if (self.index >= self.line.items.len or self.line.items[self.index].tag != .rbrace) {
+                if (self.index >= self.line.len or self.line[self.index].tag != .rbrace) {
                     return error.MissingRightBrace;
                 }
                 self.index += 1;
@@ -237,7 +249,7 @@ const SubParser = struct {
     }
 
     fn skipWhitespace(self: *SubParser) void {
-        while (self.index < self.line.items.len and self.line.items[self.index].tag == .whitespace) : (self.index += 1) {}
+        while (self.index < self.line.len and self.line[self.index].tag == .whitespace) : (self.index += 1) {}
     }
 
     fn buildInfix(self: *SubParser, tok: Token, left: *Expr, right: *Expr) !*Expr {
@@ -312,16 +324,16 @@ fn parseCombinator(tok: Token) ?Combinator {
     return std.meta.stringToEnum(Combinator, std.ascii.upperString(&out, name));
 }
 
-fn hasNonWhitespaceTokens(line: *const std.ArrayList(Token)) bool {
-    for (line.items) |tok| {
+fn hasNonWhitespaceTokens(line: []const Token) bool {
+    for (line) |tok| {
         if (tok.tag != .whitespace) return true;
     }
     return false;
 }
 
-fn nextNonWhitespaceToken(line: *const std.ArrayList(Token), index: *usize) ?Token {
-    while (index.* < line.items.len) : (index.* += 1) {
-        const tok = line.items[index.*];
+fn nextNonWhitespaceToken(line: []const Token, index: *usize) ?Token {
+    while (index.* < line.len) : (index.* += 1) {
+        const tok = line[index.*];
         index.* += 1;
         if (tok.tag != .whitespace) return tok;
     }

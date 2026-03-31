@@ -27,7 +27,8 @@ pub fn main() !void {
     // main function can't have new lines ATM
     const source =
         \\a = 2 sq
-        \\add,3 )b1 sq
+        \\c = sq
+        \\add,a )b1 c
     ;
     std.debug.print("soure:\n{s}\n", .{source});
 
@@ -43,9 +44,12 @@ pub fn main() !void {
 
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 
+    var arg0_data = [_]f64{ 2, 3 };
+    var arg1_data = [_]f64{ 4, 5 };
+    var arg_shape = [_]u32{2};
     const args = [_]types.Value{
-        .{ .scalar = .{ .value = 2, .is_char = false } },
-        .{ .scalar = .{ .value = 3, .is_char = false } },
+        .{ .array = .{ .data = arg0_data[0..], .shape = arg_shape[0..], .is_char = false } },
+        .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..], .is_char = false } },
     };
     const result = switch (file_ast.main.arity) {
         .dyad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args }),

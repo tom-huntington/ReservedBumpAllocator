@@ -26,7 +26,7 @@ pub fn main() !void {
 
     const source =
         \\a = 1_1
-        \\( c -> a add,c)
+        \\c -> a add,c
     ;
     std.debug.print("soure:\n{s}\n", .{source});
 

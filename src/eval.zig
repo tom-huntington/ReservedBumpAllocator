@@ -250,11 +250,11 @@ fn applyRightArg(
     return switch (func.arity) {
         .monad => evalFuncInContext(ctx, func, .{ .monad = .{right} }),
         .dyad => {
-            const dyad_args = switch (args) {
-                .dyad => |dyad_args| dyad_args,
-                .monad => return error.ArityMismatch,
+            const monad_args = switch (args) {
+                .monad => |monad_args| monad_args,
+                .dyad => return error.ArityMismatch,
             };
-            return evalFuncInContext(ctx, func, .{ .dyad = .{ dyad_args[0], right } });
+            return evalFuncInContext(ctx, func, .{ .dyad = .{ monad_args[0], right } });
         },
         .value => error.ArityMismatch,
     };
@@ -355,9 +355,8 @@ test "eval comma partial application fixes the right argument" {
     const file_ast = try parser.parseFile(arena.allocator());
 
     const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .dyad = .{
+        .monad = .{
             .{ .scalar = .{ .value = 2, .is_char = false } },
-            .{ .scalar = .{ .value = 99, .is_char = false } },
         },
     });
 
@@ -380,14 +379,13 @@ test "eval caret partial application transforms the right argument" {
     const file_ast = try parser.parseFile(arena.allocator());
 
     const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .dyad = .{
-            .{ .scalar = .{ .value = 2, .is_char = false } },
+        .monad = .{
             .{ .scalar = .{ .value = 3, .is_char = false } },
         },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
-    try std.testing.expectEqual(@as(f64, 11), result.scalar.value);
+    try std.testing.expectEqual(@as(f64, 12), result.scalar.value);
 }
 
 test "eval strand materializes a constant array" {

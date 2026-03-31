@@ -438,8 +438,12 @@ pub const Parser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 if (right.* != .value) return error.ExpectedValue;
+                const arity: Arity = switch (left_func.arity) {
+                    .dyad => .monad,
+                    else => left_func.arity,
+                };
                 return self.allocExpr(.{
-                    .func = .{ .arity = left_func.arity, .type = .{ .partial_apply = .{ .left = &left.func, .right = &right.value } } },
+                    .func = .{ .arity = arity, .type = .{ .partial_apply = .{ .left = &left.func, .right = &right.value } } },
                 });
             },
             .underscore => {
@@ -468,8 +472,12 @@ pub const Parser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 if (right.* != .func) return error.ExpectedFunction;
+                const arity: Arity = switch (left_func.arity) {
+                    .dyad => .monad,
+                    else => left_func.arity,
+                };
                 return self.allocExpr(.{
-                    .func = .{ .arity = left_func.arity, .type = .{ .right_partial_apply = .{ .left = &left.func, .right = &right.func } } },
+                    .func = .{ .arity = arity, .type = .{ .right_partial_apply = .{ .left = &left.func, .right = &right.func } } },
                 });
             },
             else => return error.UnexpectedToken,

@@ -24,7 +24,6 @@ pub fn main() !void {
     const a = wrap{ .v = "hello" };
     stringprint.printfmt("a: {}\n", .{a});
 
-    // main function can't have new lines ATM
     const source =
         \\a = 1_1
         \\add,a )b1 sq

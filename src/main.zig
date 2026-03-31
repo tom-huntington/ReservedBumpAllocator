@@ -26,9 +26,8 @@ pub fn main() !void {
 
     // main function can't have new lines ATM
     const source =
-        \\a = 2 sq
-        \\c = sq
-        \\add )b1 c
+        \\a = 1_1
+        \\add,a )b1 sq
     ;
     std.debug.print("soure:\n{s}\n", .{source});
 
@@ -40,7 +39,8 @@ pub fn main() !void {
 
     var parser = parse.Parser.init(ast_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
-    const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
+    var file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
+    try eval.foldFileConstants(ast_alloc, &file_ast);
 
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 

@@ -26,8 +26,8 @@ pub fn main() !void {
 
     // main function can't have new lines ATM
     const source =
-        \\a = 2
-        \\add )b1 sq
+        \\a = 2 sq
+        \\sq )b sq
     ;
     std.debug.print("soure:\n{s}\n", .{source});
 
@@ -47,6 +47,10 @@ pub fn main() !void {
         .{ .scalar = .{ .value = 2, .is_char = false } },
         .{ .scalar = .{ .value = 3, .is_char = false } },
     };
-    const result = try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args });
+    const result = switch (file_ast.main.arity) {
+        .dyad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args }),
+        .monad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .monad = .{args[0]} }),
+        .value => return error.ArityMismatch,
+    };
     stringprint.printfmt("result: {}\n", .{result});
 }

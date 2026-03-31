@@ -35,7 +35,7 @@ pub fn evalFunc(allocator: std.mem.Allocator, func: *const Expr.FuncExpr, args: 
         .userFn => |user_fn| return evalFunc(allocator, user_fn, args),
         .combinator => |com| {
             switch (com.op) {
-                .B1 => {
+                .B1, .B => {
                     const a = try evalFunc(allocator, com.left, args);
                     return evalFunc(allocator, com.right, .{ .monad = .{a} });
                 },

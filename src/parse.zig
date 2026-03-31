@@ -53,6 +53,7 @@ pub const Parser = struct {
     tokens: []const Token,
     line_offsets: []const u32,
     symbols: std.StringHashMap(Symbol),
+    local_params: std.ArrayList([]const u8),
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: []const Token, line_offsets: []const u32) Parser {
         const symbols = std.StringHashMap(Symbol).init(allocator);
@@ -62,11 +63,13 @@ pub const Parser = struct {
             .tokens = tokens,
             .line_offsets = line_offsets,
             .symbols = symbols,
+            .local_params = .empty,
         };
     }
 
     pub fn deinit(self: *Parser) void {
         self.symbols.deinit();
+        self.local_params.deinit(self.allocator);
     }
 
     pub fn parseFile(self: *Parser, allocator: std.mem.Allocator) ParseError!FileAst {
@@ -306,6 +309,14 @@ pub const Parser = struct {
             },
             .ident => {
                 const name = tok.lexeme;
+                if (try self.maybeParseArrowFunction(index, end_index, end_tag, name)) |arrow| {
+                    return arrow;
+                }
+                if (self.isLocalParam(name)) {
+                    return self.allocExpr(.{
+                        .value = .{ .literal = .{ .ident = name } },
+                    });
+                }
                 const sym = self.symbols.get(name) orelse return error.UnknownIdentifier;
                 return sym.expr;
             },
@@ -353,6 +364,62 @@ pub const Parser = struct {
 
     fn skipWhitespace(self: *const Parser, index: *usize, end_index: usize) void {
         while (index.* < end_index and self.tokens[index.*].tag == .whitespace) : (index.* += 1) {}
+    }
+
+    fn maybeParseArrowFunction(
+        self: *Parser,
+        index: *usize,
+        end_index: usize,
+        end_tag: ?TokenTag,
+        first_name: []const u8,
+    ) ParseError!?*Expr {
+        var lookahead = index.*;
+        self.skipWhitespace(&lookahead, end_index);
+        if (lookahead >= end_index) return null;
+        if (end_tag) |tag| {
+            if (self.tokens[lookahead].tag == tag) return null;
+        }
+
+        var second_name: ?[]const u8 = null;
+        if (self.tokens[lookahead].tag == .ident) {
+            second_name = self.tokens[lookahead].lexeme;
+            lookahead += 1;
+            self.skipWhitespace(&lookahead, end_index);
+            if (lookahead >= end_index) return null;
+            if (end_tag) |tag| {
+                if (self.tokens[lookahead].tag == tag) return null;
+            }
+        }
+
+        if (self.tokens[lookahead].tag != .arrow) return null;
+        lookahead += 1;
+
+        const param_start = self.local_params.items.len;
+        errdefer self.local_params.items.len = param_start;
+        try self.local_params.append(self.allocator, first_name);
+        if (second_name) |name| {
+            try self.local_params.append(self.allocator, name);
+        }
+
+        index.* = lookahead;
+        const body = try self.parseExpr(index, end_index, 0, end_tag);
+        self.local_params.items.len = param_start;
+
+        return self.allocExpr(.{
+            .func = .{
+                .arity = if (second_name == null) .monad else .dyad,
+                .type = .{ .userFn = .{ .left = first_name, .right = second_name, .body = body } },
+            },
+        });
+    }
+
+    fn isLocalParam(self: *const Parser, name: []const u8) bool {
+        var i = self.local_params.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, self.local_params.items[i], name)) return true;
+        }
+        return false;
     }
 
     fn nextNonWhitespaceToken(self: *const Parser, index: *usize, end_index: usize) ?Token {
@@ -517,4 +584,28 @@ test "parse implicit reverse application with two arguments" {
     try std.testing.expect(expr.value.apply.arg.* == .value);
     try std.testing.expect(expr.value.apply.arg.value == .strand);
     try std.testing.expect(expr.value.apply.func.* == .func);
+}
+
+test "parse monadic arrow function with local parameter references" {
+    const allocator = std.testing.allocator;
+    const source = "x -> x sq";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    try parser.populateBuiltins();
+
+    var index: usize = 0;
+    const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
+
+    try std.testing.expect(expr.* == .func);
+    try std.testing.expectEqual(@as(Arity, .monad), expr.func.arity);
+    const user_fn = expr.func.type.userFn;
+    try std.testing.expectEqualStrings("x", user_fn.left);
+    try std.testing.expect(user_fn.right == null);
 }

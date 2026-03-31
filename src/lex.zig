@@ -55,6 +55,14 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                 try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
+            '-' => {
+                if (i + 1 < line.len and line[i + 1] == '>') {
+                    try tokens.append(allocator, .{ .tag = .arrow, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
+                    i += 2;
+                } else {
+                    return error.UnexpectedChar;
+                }
+            },
             '^' => {
                 try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
@@ -156,4 +164,16 @@ test "lex accepts integer and decimal numbers" {
     try std.testing.expectEqualStrings("2", result.tokens.items[4].lexeme);
     try std.testing.expectEqual(TokenTag.number, result.tokens.items[9].tag);
     try std.testing.expectEqualStrings("3.5", result.tokens.items[9].lexeme);
+}
+
+test "lex recognizes arrow functions" {
+    const allocator = std.testing.allocator;
+    const source = "x -> x";
+
+    var result = try lex(allocator, source);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(TokenTag.ident, result.tokens.items[0].tag);
+    try std.testing.expectEqual(TokenTag.arrow, result.tokens.items[2].tag);
+    try std.testing.expectEqual(TokenTag.ident, result.tokens.items[4].tag);
 }

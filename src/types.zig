@@ -3,6 +3,7 @@ const std = @import("std");
 pub const TokenTag = enum {
     ident,
     combinator,
+    arrow,
     number,
     char_lit,
     raw_string,
@@ -68,7 +69,7 @@ pub const Expr = union(enum) {
             partial_apply: struct { left: *FuncExpr, right: *ValueExpr },
             right_partial_apply: struct { left: *FuncExpr, right: *FuncExpr },
             scope: *FuncExpr,
-            userFn: *FuncExpr,
+            userFn: struct { left: []const u8, right: ?[]const u8, body: *Expr },
             builtin: union(enum) { monad: MonadFn, dyad: DyadFn },
         },
     };

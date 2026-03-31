@@ -215,7 +215,66 @@ pub const Parser = struct {
             left = try self.buildInfix(tok, left, right);
         }
 
+        left = try self.maybeParseImplicitApply(index, end_index, end_tag, left);
         return left;
+    }
+
+    fn maybeParseImplicitApply(self: *Parser, index: *usize, end_index: usize, end_tag: ?TokenTag, left: *Expr) ParseError!*Expr {
+        if (left.* != .value) return left;
+
+        var apply_index = index.*;
+        self.skipWhitespace(&apply_index, end_index);
+        if (apply_index >= end_index) return left;
+        if (end_tag) |tag| {
+            if (self.tokens[apply_index].tag == tag) return left;
+        }
+        if (!tokenStartsExpr(self.tokens[apply_index].tag)) return left;
+
+        var func_index = apply_index;
+        if (self.parseExpr(&func_index, end_index, 0, end_tag)) |func_expr| {
+            if (func_expr.* == .func) {
+                index.* = func_index;
+                return self.allocExpr(.{
+                    .value = .{ .apply = .{ .func = func_expr, .arg = left } },
+                });
+            }
+        } else |err| switch (err) {
+            error.UnexpectedEof,
+            error.UnexpectedToken,
+            error.ExpectedFunction,
+            => {},
+            else => return err,
+        }
+
+        var second_index = apply_index;
+        const second_arg = try self.parsePrefix(&second_index, end_index, end_tag);
+        if (second_arg.* != .value) return left;
+
+        var func_start = second_index;
+        self.skipWhitespace(&func_start, end_index);
+        if (func_start >= end_index) return left;
+        if (end_tag) |tag| {
+            if (self.tokens[func_start].tag == tag) return left;
+        }
+        if (!tokenStartsExpr(self.tokens[func_start].tag)) return left;
+
+        var final_index = func_start;
+        const func_expr = self.parseExpr(&final_index, end_index, 0, end_tag) catch |err| switch (err) {
+            error.UnexpectedEof,
+            error.UnexpectedToken,
+            error.ExpectedFunction,
+            => return left,
+            else => return err,
+        };
+        if (func_expr.* != .func) return left;
+
+        const args = try self.allocExpr(.{
+            .value = .{ .strand = .{ .left = left, .right = second_arg } },
+        });
+        index.* = final_index;
+        return self.allocExpr(.{
+            .value = .{ .apply = .{ .func = func_expr, .arg = args } },
+        });
     }
 
     fn parsePrefix(self: *Parser, index: *usize, end_index: usize, end_tag: ?TokenTag) ParseError!*Expr {
@@ -320,12 +379,6 @@ pub const Parser = struct {
                     .value = .{ .strand = .{ .left = left, .right = right } },
                 });
             },
-            .pipe_gt => {
-                if (left.* != .func) return error.ExpectedFunction;
-                return self.allocExpr(.{
-                    .value = .{ .apply_rev = .{ .func = left, .arg = right } },
-                });
-            },
             .combinator => {
                 const left_func = switch (left.*) {
                     .func => |f| f,
@@ -370,8 +423,22 @@ fn infixInfo(tag: TokenTag) ?InfixInfo {
         .underscore => .{ .lbp = 80, .rbp = 81 },
         .combinator => .{ .lbp = 60, .rbp = 61 },
         .caret => .{ .lbp = 55, .rbp = 56 },
-        .pipe_gt => .{ .lbp = 10, .rbp = 11 },
         else => null,
+    };
+}
+
+fn tokenStartsExpr(tag: TokenTag) bool {
+    return switch (tag) {
+        .number,
+        .char_lit,
+        .raw_string,
+        .ident,
+        .lparen,
+        .lbrace,
+        .backslash,
+        .dbl_backslash,
+        => true,
+        else => false,
     };
 }
 
@@ -400,4 +467,53 @@ fn isConstStart(line: []const Token, start_index: usize) bool {
         return tok.tag == .equal;
     }
     return false;
+}
+
+test "parse implicit reverse application with one argument" {
+    const allocator = std.testing.allocator;
+    const source = "1 sq";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    try parser.populateBuiltins();
+
+    var index: usize = 0;
+    const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
+
+    try std.testing.expectEqual(@as(usize, lexed.tokens.items.len), index);
+    try std.testing.expect(expr.* == .value);
+    try std.testing.expect(expr.value == .apply);
+    try std.testing.expect(expr.value.apply.arg.* == .value);
+    try std.testing.expect(expr.value.apply.func.* == .func);
+}
+
+test "parse implicit reverse application with two arguments" {
+    const allocator = std.testing.allocator;
+    const source = "1 2 add";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    try parser.populateBuiltins();
+
+    var index: usize = 0;
+    const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
+
+    try std.testing.expectEqual(@as(usize, lexed.tokens.items.len), index);
+    try std.testing.expect(expr.* == .value);
+    try std.testing.expect(expr.value == .apply);
+    try std.testing.expect(expr.value.apply.arg.* == .value);
+    try std.testing.expect(expr.value.apply.arg.value == .strand);
+    try std.testing.expect(expr.value.apply.func.* == .func);
 }

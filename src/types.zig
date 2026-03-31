@@ -9,7 +9,6 @@ pub const TokenTag = enum {
     comma,
     caret,
     underscore,
-    pipe_gt,
     lparen,
     rparen,
     lbrace,
@@ -76,6 +75,6 @@ pub const Expr = union(enum) {
     pub const ValueExpr = union(enum) {
         literal: Value,
         strand: struct { left: *Expr, right: *Expr },
-        apply_rev: struct { func: *Expr, arg: *Expr },
+        apply: struct { func: *Expr, arg: *Expr },
     };
 };

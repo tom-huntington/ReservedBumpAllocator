@@ -63,16 +63,12 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
             if (args.len != 1) return error.ArityMismatch;
             return evalReduce(ctx, reduced, args[0]);
         },
-        .partial_apply => |partial| {
-            const right = ctx.allocator.alloc(Value, partial.right.len) catch @panic("out of memory");
-            for (partial.right, 0..) |*expr, i| {
+        .partial_apply_permute => |partial| {
+            const right = ctx.allocator.alloc(Value, partial.arguments.len) catch @panic("out of memory");
+            for (partial.arguments, 0..) |*expr, i| {
                 right[i] = try evalValueExpr(ctx, expr);
             }
-            return applyRightArgs(ctx, partial.left, args, right);
-        },
-        .right_partial_apply => |partial| {
-            const right = try evalRightFunc(ctx, partial.right, args);
-            return applyRightArgs(ctx, partial.left, args, &.{right});
+            return applyRightArgs(ctx, partial.func, args, right, partial.permutation_index);
         },
     }
 }
@@ -167,17 +163,13 @@ fn foldFuncExpr(allocator: std.mem.Allocator, func: *Expr.FuncExpr) EvalError!vo
         .reduce => |reduced| {
             try foldFuncExpr(allocator, reduced);
         },
-        .partial_apply => |partial| {
-            for (partial.right) |*expr| {
+        .partial_apply_permute => |partial| {
+            for (partial.arguments) |*expr| {
                 if (try tryFoldValueExpr(allocator, expr)) |value| {
                     expr.* = .{ .literal = value };
                 }
             }
-            try foldFuncExpr(allocator, partial.left);
-        },
-        .right_partial_apply => |partial| {
-            try foldFuncExpr(allocator, partial.left);
-            try foldFuncExpr(allocator, partial.right);
+            try foldFuncExpr(allocator, partial.func);
         },
     }
 }
@@ -226,28 +218,67 @@ fn evalArgs(ctx: *EvalContext, expr: *const Expr) EvalError![]const Value {
     };
 }
 
-fn evalRightFunc(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []const Value) EvalError!Value {
-    return switch (args.len) {
-        1 => evalFuncInContext(ctx, func, args),
-        2 => switch (func.arity) {
-            2 => evalFuncInContext(ctx, func, args),
-            1 => evalFuncInContext(ctx, func, args[1..2]),
-            else => error.ArityMismatch,
-        },
-        else => error.ArityMismatch,
-    };
-}
-
 fn applyRightArgs(
     ctx: *EvalContext,
     func: *const Expr.FuncExpr,
     args: []const Value,
     right: []const Value,
+    permutation_index: u32,
 ) EvalError!Value {
     const combined = ctx.allocator.alloc(Value, args.len + right.len) catch @panic("out of memory");
     @memcpy(combined[0..args.len], args);
     @memcpy(combined[args.len..], right);
-    return evalFuncInContext(ctx, func, combined);
+    if (permutation_index == 0 or combined.len <= 1) {
+        return evalFuncInContext(ctx, func, combined);
+    }
+
+    const order = try nthPermutation(ctx.allocator, combined.len, permutation_index);
+    const permuted = ctx.allocator.alloc(Value, combined.len) catch @panic("out of memory");
+    for (order, 0..) |source_index, i| {
+        permuted[i] = combined[source_index];
+    }
+    return evalFuncInContext(ctx, func, permuted);
+}
+
+fn nthPermutation(allocator: std.mem.Allocator, len: usize, permutation_index: u32) EvalError![]usize {
+    var max_index: u64 = 1;
+    for (2..len + 1) |n| {
+        max_index *= n;
+    }
+    if (permutation_index >= max_index) return error.ArityMismatch;
+
+    const indices = allocator.alloc(usize, len) catch @panic("out of memory");
+    const order = allocator.alloc(usize, len) catch @panic("out of memory");
+    for (0..len) |i| {
+        indices[i] = i;
+    }
+
+    var remaining: u64 = permutation_index;
+    var remaining_len = len;
+    var out_index: usize = 0;
+    while (remaining_len > 0) : (remaining_len -= 1) {
+        const block = factorial(remaining_len - 1);
+        const pick = if (remaining_len == 1) 0 else @as(usize, @intCast(remaining / block));
+        remaining = if (remaining_len == 1) 0 else remaining % block;
+
+        order[out_index] = indices[pick];
+        out_index += 1;
+
+        var i = pick;
+        while (i + 1 < remaining_len) : (i += 1) {
+            indices[i] = indices[i + 1];
+        }
+    }
+
+    return order;
+}
+
+fn factorial(n: usize) u64 {
+    var result: u64 = 1;
+    for (2..n + 1) |i| {
+        result *= i;
+    }
+    return result;
 }
 
 fn evalReduce(ctx: *EvalContext, func: *const Expr.FuncExpr, value: Value) EvalError!Value {
@@ -351,7 +382,7 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
     return .{ .array = .{ .data = data, .shape = shape, .is_char = is_char } };
 }
 
-test "eval comma partial application fixes the right argument" {
+test "eval identifier suffix partial application fixes the right argument" {
     const allocator = std.testing.allocator;
     const source = "add,3";
 
@@ -373,9 +404,9 @@ test "eval comma partial application fixes the right argument" {
     try std.testing.expectEqual(@as(f64, 5), result.scalar.value);
 }
 
-test "eval caret partial application transforms the right argument" {
+test "eval identifier suffix permutation reorders arguments" {
     const allocator = std.testing.allocator;
-    const source = "add^sq";
+    const source = "add,10^1";
 
     var lexed = try @import("lex.zig").lex(allocator, source);
     defer lexed.deinit(allocator);
@@ -392,7 +423,7 @@ test "eval caret partial application transforms the right argument" {
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
-    try std.testing.expectEqual(@as(f64, 12), result.scalar.value);
+    try std.testing.expectEqual(@as(f64, 13), result.scalar.value);
 }
 
 test "eval strand materializes a constant array" {
@@ -444,18 +475,18 @@ test "constant folding rewrites partial application constants before main eval" 
 
     const partial = switch (file_ast.main.type) {
         .combinator => |com| switch (com.left.type) {
-            .partial_apply => |partial| partial,
+            .partial_apply_permute => |partial| partial,
             else => return error.UnsupportedFunctionKind,
         },
         else => return error.UnsupportedFunctionKind,
     };
 
-    try std.testing.expectEqual(@as(usize, 1), partial.right.len);
-    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[0]);
-    try std.testing.expectEqual(@as(Value.Tag, .array), partial.right[0].literal);
+    try std.testing.expectEqual(@as(usize, 1), partial.arguments.len);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.arguments[0]);
+    try std.testing.expectEqual(@as(Value.Tag, .array), partial.arguments[0].literal);
 }
 
-test "eval chained comma partial application appends captured values in order" {
+test "eval chained identifier suffix partial application appends captured values in order" {
     const allocator = std.testing.allocator;
     const source = "strided,2,3";
 

@@ -45,7 +45,7 @@ const ParseError = error{
     MissingMain,
     MainMustBeFunction,
     InvalidConst,
-} || std.fmt.ParseFloatError || std.mem.Allocator.Error;
+} || std.fmt.ParseFloatError || std.fmt.ParseIntError || std.mem.Allocator.Error;
 
 pub const Parser = struct {
     allocator: std.mem.Allocator,
@@ -313,7 +313,7 @@ pub const Parser = struct {
                     });
                 }
                 const sym = self.symbols.get(name) orelse return error.UnknownIdentifier;
-                return sym.expr;
+                return try self.maybeParseIdentifierSuffixes(index, end_index, sym.expr);
             },
             .lparen => {
                 const body = try self.parseExpr(index, end_index, 0, .rparen);
@@ -425,6 +425,104 @@ pub const Parser = struct {
         return false;
     }
 
+    fn maybeParseIdentifierSuffixes(
+        self: *Parser,
+        index: *usize,
+        end_index: usize,
+        expr: *Expr,
+    ) ParseError!*Expr {
+        var suffix_index = index.*;
+        var values: std.ArrayList(Expr.ValueExpr) = .empty;
+        defer values.deinit(self.allocator);
+        var permutation_index: u32 = 0;
+        var saw_suffix = false;
+
+        while (true) {
+            self.skipWhitespace(&suffix_index, end_index);
+            if (suffix_index >= end_index) break;
+
+            switch (self.tokens[suffix_index].tag) {
+                .comma => {
+                    suffix_index += 1;
+                    try values.append(self.allocator, try self.parseIdentifierSuffixValue(&suffix_index, end_index));
+                    saw_suffix = true;
+                },
+                .caret => {
+                    suffix_index += 1;
+                    permutation_index = try self.parsePermutationIndex(&suffix_index, end_index);
+                    saw_suffix = true;
+                },
+                else => break,
+            }
+        }
+
+        if (!saw_suffix) return expr;
+        if (expr.* != .func) return error.ExpectedFunction;
+
+        index.* = suffix_index;
+        const arguments = try values.toOwnedSlice(self.allocator);
+        const arity = if (expr.func.arity > arguments.len) expr.func.arity - @as(u32, @intCast(arguments.len)) else expr.func.arity;
+        return self.allocExpr(.{
+            .func = .{ .arity = arity, .type = .{ .partial_apply_permute = .{
+                .func = &expr.func,
+                .arguments = arguments,
+                .permutation_index = permutation_index,
+            } } },
+        });
+    }
+
+    fn parseIdentifierSuffixValue(self: *Parser, index: *usize, end_index: usize) ParseError!Expr.ValueExpr {
+        self.skipWhitespace(index, end_index);
+        if (index.* >= end_index) return error.UnexpectedEof;
+
+        const tok = self.tokens[index.*];
+        index.* += 1;
+
+        return switch (tok.tag) {
+            .number => .{
+                .literal = .{ .scalar = .{
+                    .value = try std.fmt.parseFloat(f64, tok.lexeme),
+                    .is_char = false,
+                } },
+            },
+            .char_lit => .{
+                .literal = .{ .scalar = .{
+                    .value = @floatFromInt(tok.lexeme[1]),
+                    .is_char = true,
+                } },
+            },
+            .raw_string => .{
+                .literal = .{ .array = .{
+                    .data = &.{},
+                    .shape = &.{},
+                    .is_char = true,
+                } },
+            },
+            .ident => blk: {
+                if (self.isLocalParam(tok.lexeme)) {
+                    break :blk .{ .ident = tok.lexeme };
+                }
+
+                const sym = self.symbols.get(tok.lexeme) orelse return error.UnknownIdentifier;
+                if (sym.expr.* != .value) return error.ExpectedValue;
+                break :blk sym.expr.value;
+            },
+            else => error.ExpectedValue,
+        };
+    }
+
+    fn parsePermutationIndex(self: *const Parser, index: *usize, end_index: usize) ParseError!u32 {
+        self.skipWhitespace(index, end_index);
+        if (index.* >= end_index) return error.UnexpectedEof;
+
+        const tok = self.tokens[index.*];
+        if (tok.tag != .number) return error.ExpectedValue;
+        if (std.mem.indexOfScalar(u8, tok.lexeme, '.')) |_| return error.ExpectedValue;
+
+        index.* += 1;
+        return try std.fmt.parseInt(u32, tok.lexeme, 10);
+    }
+
     fn nextNonWhitespaceToken(self: *const Parser, index: *usize, end_index: usize) ?Token {
         self.skipWhitespace(index, end_index);
         if (index.* >= end_index) return null;
@@ -436,35 +534,7 @@ pub const Parser = struct {
     fn buildInfix(self: *Parser, tok: Token, left: *Expr, right: *Expr) ParseError!*Expr {
         switch (tok.tag) {
             .comma => {
-                const left_func = switch (left.*) {
-                    .func => |f| f,
-                    .value => return error.ExpectedFunction,
-                };
-                if (right.* != .value) return error.ExpectedValue;
-                const arity = if (left_func.arity > 1) left_func.arity - 1 else left_func.arity;
-                switch (left_func.type) {
-                    .partial_apply => |partial| {
-                        const values = self.allocator.alloc(Expr.ValueExpr, partial.right.len + 1) catch @panic("out of memory");
-                        @memcpy(values[0..partial.right.len], partial.right);
-                        values[partial.right.len] = right.value;
-                        return self.allocExpr(.{
-                            .func = .{ .arity = arity, .type = .{ .partial_apply = .{
-                                .left = partial.left,
-                                .right = values,
-                            } } },
-                        });
-                    },
-                    else => {
-                        const values = self.allocator.alloc(Expr.ValueExpr, 1) catch @panic("out of memory");
-                        values[0] = right.value;
-                        return self.allocExpr(.{
-                            .func = .{ .arity = arity, .type = .{ .partial_apply = .{
-                                .left = &left.func,
-                                .right = values,
-                            } } },
-                        });
-                    },
-                }
+                return error.UnexpectedToken;
             },
             .underscore => {
                 return self.allocExpr(.{
@@ -486,17 +556,7 @@ pub const Parser = struct {
                     .func = .{ .arity = arity, .type = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
                 });
             },
-            .caret => {
-                const left_func = switch (left.*) {
-                    .func => |f| f,
-                    .value => return error.ExpectedFunction,
-                };
-                if (right.* != .func) return error.ExpectedFunction;
-                const arity = if (left_func.arity > 1) left_func.arity - 1 else left_func.arity;
-                return self.allocExpr(.{
-                    .func = .{ .arity = arity, .type = .{ .right_partial_apply = .{ .left = &left.func, .right = &right.func } } },
-                });
-            },
+            .caret => return error.UnexpectedToken,
             else => return error.UnexpectedToken,
         }
     }
@@ -512,10 +572,8 @@ const InfixInfo = struct { lbp: u8, rbp: u8 };
 
 fn infixInfo(tag: TokenTag) ?InfixInfo {
     return switch (tag) {
-        .comma => .{ .lbp = 90, .rbp = 91 },
         .underscore => .{ .lbp = 80, .rbp = 81 },
         .combinator => .{ .lbp = 60, .rbp = 61 },
-        .caret => .{ .lbp = 55, .rbp = 56 },
         else => null,
     };
 }
@@ -639,7 +697,7 @@ test "parse implicit reverse application with two arguments" {
     try std.testing.expect(expr.value.apply.func.* == .func);
 }
 
-test "parse chained comma partial application folds captured values" {
+test "parse identifier suffixes fold captured values" {
     const allocator = std.testing.allocator;
     const source = "strided,2,3";
 
@@ -660,16 +718,49 @@ test "parse chained comma partial application folds captured values" {
     try std.testing.expect(expr.* == .func);
 
     const partial = switch (expr.func.type) {
-        .partial_apply => |partial| partial,
+        .partial_apply_permute => |partial| partial,
         else => return error.UnsupportedFunctionKind,
     };
 
     try std.testing.expectEqual(@as(u32, 1), expr.func.arity);
-    try std.testing.expectEqual(@as(usize, 2), partial.right.len);
-    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[0]);
-    try std.testing.expectEqual(@as(f64, 2), partial.right[0].literal.scalar.value);
-    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[1]);
-    try std.testing.expectEqual(@as(f64, 3), partial.right[1].literal.scalar.value);
+    try std.testing.expectEqual(@as(usize, 2), partial.arguments.len);
+    try std.testing.expectEqual(@as(u32, 0), partial.permutation_index);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.arguments[0]);
+    try std.testing.expectEqual(@as(f64, 2), partial.arguments[0].literal.scalar.value);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.arguments[1]);
+    try std.testing.expectEqual(@as(f64, 3), partial.arguments[1].literal.scalar.value);
+}
+
+test "parse identifier suffixes accept local params and permutation indices" {
+    const allocator = std.testing.allocator;
+    const source = "x -> add,x^2";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    try parser.populateBuiltins();
+
+    var index: usize = 0;
+    const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
+
+    try std.testing.expect(expr.* == .func);
+    const body = expr.func.type.userFn.body;
+    try std.testing.expect(body.* == .func);
+
+    const partial = switch (body.func.type) {
+        .partial_apply_permute => |partial| partial,
+        else => return error.UnsupportedFunctionKind,
+    };
+
+    try std.testing.expectEqual(@as(usize, 1), partial.arguments.len);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .ident), partial.arguments[0]);
+    try std.testing.expectEqualStrings("x", partial.arguments[0].ident);
+    try std.testing.expectEqual(@as(u32, 2), partial.permutation_index);
 }
 
 test "parse monadic arrow function with local parameter references" {

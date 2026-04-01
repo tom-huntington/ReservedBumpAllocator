@@ -69,8 +69,7 @@ pub const Expr = union(enum) {
         type: union(enum) {
             combinator: struct { op: Combinator, left: *FuncExpr, right: *FuncExpr },
             reduce: *FuncExpr,
-            partial_apply: struct { left: *FuncExpr, right: []ValueExpr },
-            right_partial_apply: struct { left: *FuncExpr, right: *FuncExpr },
+            partial_apply_permute: struct { func: *FuncExpr, arguments: []ValueExpr, permutation_index: u32 },
             scope: *FuncExpr,
             userFn: struct { left: []const u8, right: ?[]const u8, body: *Expr },
             builtin: Builtin,

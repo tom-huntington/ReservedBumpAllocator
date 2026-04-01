@@ -1,5 +1,4 @@
 const std = @import("std");
-const parse = @import("parse.zig");
 const types = @import("types.zig");
 const Expr = types.Expr;
 const Value = types.Value;
@@ -26,13 +25,6 @@ const EvalContext = struct {
         self.bindings.deinit();
     }
 };
-
-pub fn foldFileConstants(allocator: std.mem.Allocator, file_ast: *parse.FileAst) EvalError!void {
-    for (file_ast.consts) |const_def| {
-        _ = try foldExpr(allocator, const_def.expr);
-    }
-    try foldFuncExpr(allocator, file_ast.main);
-}
 
 pub fn evalFunc(allocator: std.mem.Allocator, func: *const Expr.FuncExpr, args: []const Value) EvalError!Value {
     var ctx = EvalContext.init(allocator);
@@ -132,72 +124,6 @@ fn evalValueExpr(ctx: *EvalContext, expr: *const Expr.ValueExpr) EvalError!Value
             };
             return evalFuncInContext(ctx, func, try evalArgs(ctx, apply.arg));
         },
-    };
-}
-
-fn foldExpr(allocator: std.mem.Allocator, expr: *Expr) EvalError!bool {
-    switch (expr.*) {
-        .func => {
-            try foldFuncExpr(allocator, &expr.func);
-            return false;
-        },
-        .value => {
-            if (try tryFoldValueExpr(allocator, &expr.value)) |value| {
-                expr.* = .{ .value = .{ .literal = value } };
-                return true;
-            }
-            return false;
-        },
-    }
-}
-
-fn foldFuncExpr(allocator: std.mem.Allocator, func: *Expr.FuncExpr) EvalError!void {
-    switch (func.type) {
-        .builtin => {},
-        .scope => |scoped| try foldFuncExpr(allocator, scoped),
-        .userFn => |user_fn| {
-            _ = try foldExpr(allocator, user_fn.body);
-        },
-        .combinator => |com| {
-            try foldFuncExpr(allocator, com.left);
-            try foldFuncExpr(allocator, com.right);
-        },
-        .hof => |hof| {
-            try foldFuncExpr(allocator, hof.funcArg);
-        },
-        .partial_apply_permute => |partial| {
-            for (partial.arguments) |*expr| {
-                if (try tryFoldValueExpr(allocator, expr)) |value| {
-                    expr.* = .{ .literal = value };
-                }
-            }
-            try foldFuncExpr(allocator, partial.func);
-        },
-    }
-}
-
-fn tryFoldValueExpr(allocator: std.mem.Allocator, expr: *Expr.ValueExpr) EvalError!?Value {
-    switch (expr.*) {
-        .literal => |literal| return literal,
-        .ident => return null,
-        .strand => |strand| {
-            const left_const = try foldExpr(allocator, strand.left);
-            const right_const = try foldExpr(allocator, strand.right);
-            if (!left_const or !right_const) return null;
-        },
-        .apply => |apply| {
-            if (apply.func.* != .func) return null;
-            try foldFuncExpr(allocator, &apply.func.func);
-            const arg_const = try foldExpr(allocator, apply.arg);
-            if (!arg_const) return null;
-        },
-    }
-
-    var ctx = EvalContext.init(allocator);
-    defer ctx.deinit();
-    return evalValueExpr(&ctx, expr) catch |err| switch (err) {
-        error.UnboundIdentifier => null,
-        else => return err,
     };
 }
 

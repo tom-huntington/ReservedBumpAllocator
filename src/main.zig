@@ -43,9 +43,7 @@ pub fn main() !void {
 
     var parser = parse.Parser.init(ast_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
-    var file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
-    try eval.foldFileConstants(ast_alloc, &file_ast);
-
+    const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 
     var arg0_data = [_]f64{ 1, 2, 3, 4, 5, 6, 7, 8 };

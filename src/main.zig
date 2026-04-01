@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const quiver = @import("quiver");
 const stringprint = @import("stringprint.zig");
 const parse = @import("parse.zig");
@@ -12,6 +13,10 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main() !void {
+    if (builtin.os.tag == .windows) {
+        _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
+    }
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

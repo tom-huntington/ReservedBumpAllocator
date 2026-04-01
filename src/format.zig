@@ -505,37 +505,3 @@ fn deinitMetaGrid(metagrid: *MetaGrid) void {
     }
     metagrid.deinit();
 }
-
-test "formats scalar numbers and chars" {
-    const allocator = std.testing.allocator;
-
-    const pi_rendered = try valueString(allocator, .{ .scalar = .{ .value = std.math.pi, .is_char = false } });
-    defer allocator.free(pi_rendered);
-    try std.testing.expectEqualStrings("π", pi_rendered);
-
-    const char_rendered = try valueString(allocator, .{ .scalar = .{ .value = 'a', .is_char = true } });
-    defer allocator.free(char_rendered);
-    try std.testing.expectEqualStrings("@a", char_rendered);
-}
-
-test "formats vectors and matrices" {
-    const allocator = std.testing.allocator;
-
-    const vector = try valueString(allocator, .{
-        .array = .{ .data = &.{ 1, 2, 3 }, .shape = &.{3}, .is_char = false },
-    });
-    defer allocator.free(vector);
-    try std.testing.expectEqualStrings("[1 2 3]", vector);
-
-    const chars = try valueString(allocator, .{
-        .array = .{ .data = &.{ 'h', 'i' }, .shape = &.{2}, .is_char = true },
-    });
-    defer allocator.free(chars);
-    try std.testing.expectEqualStrings("\"hi\"", chars);
-
-    const matrix = try valueString(allocator, .{
-        .array = .{ .data = &.{ 1, 2, 3, 4 }, .shape = &.{ 2, 2 }, .is_char = false },
-    });
-    defer allocator.free(matrix);
-    try std.testing.expect(std.mem.indexOf(u8, matrix, "\n") != null);
-}

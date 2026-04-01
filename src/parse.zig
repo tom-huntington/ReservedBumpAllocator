@@ -240,12 +240,50 @@ pub const Parser = struct {
             if (op_info.lbp < min_bp) break;
             index.* += 1;
 
+            if (tok.tag == .combinator) {
+                left = try self.parseCombinatorInfix(tok, left, index, end_index, end_tag);
+                continue;
+            }
+
             const right = try self.parseExpr(index, end_index, op_info.rbp, end_tag);
             left = try self.buildInfix(tok, left, right);
         }
 
         left = try self.maybeParseImplicitApply(index, end_index, end_tag, left);
         return left;
+    }
+
+    fn parseCombinatorInfix(
+        self: *Parser,
+        tok: Token,
+        left: *Expr,
+        index: *usize,
+        end_index: usize,
+        end_tag: ?TokenTag,
+    ) ParseError!*Expr {
+        if (left.* != .func) return error.ExpectedFunction;
+
+        const op = parseCombinator(tok) orelse return error.UnknownCombinator;
+        var remaining = try self.parseExpr(index, end_index, infixInfo(.combinator).?.rbp, end_tag);
+        if (remaining.* != .func) return error.ExpectedFunction;
+
+        while (true) {
+            self.skipWhitespace(index, end_index);
+            if (index.* >= end_index) break;
+
+            const next = self.tokens[index.*];
+            if (end_tag) |tag| {
+                if (next.tag == tag) break;
+            }
+            if (next.tag == .combinator) break;
+            if (!tokenStartsExpr(next.tag)) break;
+
+            const arg = try self.parseExpr(index, end_index, infixInfo(.combinator).?.rbp, end_tag);
+            if (arg.* != .func) return error.ExpectedFunction;
+            remaining = try self.allocCombinatorExpr(op, &remaining.func, &arg.func);
+        }
+
+        return self.allocCombinatorExpr(op, &left.func, &remaining.func);
     }
 
     fn maybeParseImplicitApply(self: *Parser, index: *usize, end_index: usize, end_tag: ?TokenTag, left: *Expr) ParseError!*Expr {
@@ -697,28 +735,28 @@ pub const Parser = struct {
     }
 
     fn buildInfix(self: *Parser, tok: Token, left: *Expr, right: *Expr) ParseError!*Expr {
+        _ = self;
+        _ = left;
+        _ = right;
         switch (tok.tag) {
             .comma => {
                 return error.UnexpectedToken;
             },
-            .combinator => {
-                const left_func = switch (left.*) {
-                    .func => |f| f,
-                    .value => return error.ExpectedFunction,
-                };
-                const right_func = switch (right.*) {
-                    .func => |f| f,
-                    .value => return error.ExpectedFunction,
-                };
-                const arity = if (left_func.arity == right_func.arity) left_func.arity else 2;
-                const op = parseCombinator(tok) orelse return error.UnknownCombinator;
-                return self.allocExpr(.{
-                    .func = .{ .arity = arity, .type = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
-                });
-            },
+            .combinator => return error.UnexpectedToken,
             .caret => return error.UnexpectedToken,
             else => return error.UnexpectedToken,
         }
+    }
+
+    fn allocCombinatorExpr(self: *Parser, op: Combinator, first_arg: *Expr.FuncExpr, remaining_args: *Expr.FuncExpr) ParseError!*Expr {
+        const arity = if (first_arg.arity == remaining_args.arity) first_arg.arity else 2;
+        return self.allocExpr(.{
+            .func = .{ .arity = arity, .type = .{ .combinator = .{
+                .op = op,
+                .first_arg = first_arg,
+                .remaining_args = remaining_args,
+            } } },
+        });
     }
 
     fn allocExpr(self: *Parser, expr: Expr) ParseError!*Expr {

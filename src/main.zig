@@ -24,7 +24,7 @@ pub fn main() !void {
     const a = wrap{ .v = "hello" };
     stringprint.printfmt("a: {}\n", .{a});
 
-    const source = 
+    const source =
         \\ add
         \\ )b1 sq
     ;
@@ -38,14 +38,22 @@ pub fn main() !void {
 
     var parser = parse.Parser.init(ast_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
-    const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
+    var file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
+    try eval.foldFileConstants(ast_alloc, &file_ast);
 
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 
+    var arg0_data = [_]f64{ 2, 3 };
+    var arg1_data = [_]f64{ 4, 5 };
+    var arg_shape = [_]u32{2};
     const args = [_]types.Value{
-        .{ .scalar = .{ .value = 2, .is_char = false } },
-        .{ .scalar = .{ .value = 3, .is_char = false } },
+        .{ .array = .{ .data = arg0_data[0..], .shape = arg_shape[0..], .is_char = false } },
+        .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..], .is_char = false } },
     };
-    const result = try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args });
+    const result = switch (file_ast.main.arity) {
+        .dyad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args }),
+        .monad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .monad = .{args[0]} }),
+        .value => return error.ArityMismatch,
+    };
     stringprint.printfmt("result: {}\n", .{result});
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const Token = types.Token;
+const TokenTag = types.TokenTag;
 
 pub const LexResult = struct {
     tokens: std.ArrayList(Token),
@@ -57,6 +58,14 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                 try tokens.append(allocator, .{ .tag = .comma, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
+            '-' => {
+                if (i + 1 < line.len and line[i + 1] == '>') {
+                    try tokens.append(allocator, .{ .tag = .arrow, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
+                    i += 2;
+                } else {
+                    return error.UnexpectedChar;
+                }
+            },
             '^' => {
                 try tokens.append(allocator, .{ .tag = .caret, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
@@ -96,14 +105,6 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                 try tokens.append(allocator, .{ .tag = .rbrace, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
             },
-            '|' => {
-                if (i + 1 < line.len and line[i + 1] == '>') {
-                    try tokens.append(allocator, .{ .tag = .pipe_gt, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
-                    i += 2;
-                } else {
-                    return error.UnexpectedChar;
-                }
-            },
             '\\' => {
                 if (i + 1 < line.len and line[i + 1] == '\\') {
                     try tokens.append(allocator, .{ .tag = .dbl_backslash, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
@@ -112,6 +113,10 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                     try tokens.append(allocator, .{ .tag = .backslash, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                     i += 1;
                 }
+            },
+            '/' => {
+                try tokens.append(allocator, .{ .tag = .slash, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
+                i += 1;
             },
             '=' => {
                 try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
@@ -136,11 +141,9 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                         j += 1;
                         if (j >= line.len or !std.ascii.isDigit(line[j])) return error.InvalidNumber;
                         while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
-                        try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j, .lexeme = line[i..j] });
-                        i = j;
-                    } else {
-                        return error.InvalidNumber;
                     }
+                    try tokens.append(allocator, .{ .tag = .number, .start = start, .end = base + j, .lexeme = line[i..j] });
+                    i = j;
                 } else if (std.ascii.isAlphabetic(c)) {
                     var j = i;
                     while (j < line.len and std.ascii.isAlphabetic(line[j])) : (j += 1) {}
@@ -152,4 +155,44 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
             },
         }
     }
+}
+
+test "lex accepts integer and decimal numbers" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\a = 2
+        \\b = 3.5
+    ;
+
+    var result = try lex(allocator, source);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 10), result.tokens.items.len);
+    try std.testing.expectEqual(TokenTag.number, result.tokens.items[4].tag);
+    try std.testing.expectEqualStrings("2", result.tokens.items[4].lexeme);
+    try std.testing.expectEqual(TokenTag.number, result.tokens.items[9].tag);
+    try std.testing.expectEqualStrings("3.5", result.tokens.items[9].lexeme);
+}
+
+test "lex recognizes arrow functions" {
+    const allocator = std.testing.allocator;
+    const source = "x -> x";
+
+    var result = try lex(allocator, source);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(TokenTag.ident, result.tokens.items[0].tag);
+    try std.testing.expectEqual(TokenTag.arrow, result.tokens.items[2].tag);
+    try std.testing.expectEqual(TokenTag.ident, result.tokens.items[4].tag);
+}
+
+test "lex recognizes slash operator" {
+    const allocator = std.testing.allocator;
+    const source = "/ add";
+
+    var result = try lex(allocator, source);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(TokenTag.slash, result.tokens.items[0].tag);
+    try std.testing.expectEqualStrings("/", result.tokens.items[0].lexeme);
 }

@@ -506,7 +506,7 @@ pub fn printValue(
                 if (ptr_info.child == u8) {
                     const str: []const u8 = value;
                     try w.writeByte('"');
-                    try w.writeAll(str);
+                    try std.zig.stringEscape(str, w);
                     return w.writeByte('"');
                 }
                 if (max_depth == 0) return w.writeAll("{ ... }");

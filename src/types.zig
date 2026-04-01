@@ -29,10 +29,11 @@ pub const Token = struct {
 };
 
 pub const Arity = enum { value, monad, dyad };
-
+pub const Array = struct { data: []f64, shape: []u32, is_char: bool };
+pub const Scalar = struct { value: f64, is_char: bool };
 pub const Value = union(enum) {
-    scalar: struct { value: f64, is_char: bool },
-    array: struct { data: []f64, shape: []u32, is_char: bool },
+    scalar: Scalar,
+    array: Array,
 };
 
 pub const Combinator = enum {

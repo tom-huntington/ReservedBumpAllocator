@@ -442,9 +442,29 @@ pub const Parser = struct {
                 };
                 if (right.* != .value) return error.ExpectedValue;
                 const arity = if (left_func.arity > 1) left_func.arity - 1 else left_func.arity;
-                return self.allocExpr(.{
-                    .func = .{ .arity = arity, .type = .{ .partial_apply = .{ .left = &left.func, .right = &right.value } } },
-                });
+                switch (left_func.type) {
+                    .partial_apply => |partial| {
+                        const values = self.allocator.alloc(Expr.ValueExpr, partial.right.len + 1) catch @panic("out of memory");
+                        @memcpy(values[0..partial.right.len], partial.right);
+                        values[partial.right.len] = right.value;
+                        return self.allocExpr(.{
+                            .func = .{ .arity = arity, .type = .{ .partial_apply = .{
+                                .left = partial.left,
+                                .right = values,
+                            } } },
+                        });
+                    },
+                    else => {
+                        const values = self.allocator.alloc(Expr.ValueExpr, 1) catch @panic("out of memory");
+                        values[0] = right.value;
+                        return self.allocExpr(.{
+                            .func = .{ .arity = arity, .type = .{ .partial_apply = .{
+                                .left = &left.func,
+                                .right = values,
+                            } } },
+                        });
+                    },
+                }
             },
             .underscore => {
                 return self.allocExpr(.{
@@ -617,6 +637,39 @@ test "parse implicit reverse application with two arguments" {
     try std.testing.expect(expr.value.apply.arg.* == .value);
     try std.testing.expect(expr.value.apply.arg.value == .strand);
     try std.testing.expect(expr.value.apply.func.* == .func);
+}
+
+test "parse chained comma partial application folds captured values" {
+    const allocator = std.testing.allocator;
+    const source = "strided,2,3";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    try parser.populateBuiltins();
+
+    var index: usize = 0;
+    const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
+
+    try std.testing.expectEqual(@as(usize, lexed.tokens.items.len), index);
+    try std.testing.expect(expr.* == .func);
+
+    const partial = switch (expr.func.type) {
+        .partial_apply => |partial| partial,
+        else => return error.UnsupportedFunctionKind,
+    };
+
+    try std.testing.expectEqual(@as(u32, 1), expr.func.arity);
+    try std.testing.expectEqual(@as(usize, 2), partial.right.len);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[0]);
+    try std.testing.expectEqual(@as(f64, 2), partial.right[0].literal.scalar.value);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[1]);
+    try std.testing.expectEqual(@as(f64, 3), partial.right[1].literal.scalar.value);
 }
 
 test "parse monadic arrow function with local parameter references" {

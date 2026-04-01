@@ -25,8 +25,7 @@ pub fn main() !void {
     stringprint.printfmt("a: {}\n", .{a});
 
     const source =
-        \\ add
-        \\ )b1 sq
+        \\ strided,2,3
     ;
     std.debug.print("soure: {s}\n", .{source});
 
@@ -43,7 +42,7 @@ pub fn main() !void {
 
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 
-    var arg0_data = [_]f64{ 2, 3 };
+    var arg0_data = [_]f64{ 1, 2, 3, 4, 5, 6, 7 };
     var arg1_data = [_]f64{ 4, 5 };
     var arg_shape = [_]u32{2};
     const args = [_]types.Value{

@@ -64,12 +64,15 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
             return evalReduce(ctx, reduced, args[0]);
         },
         .partial_apply => |partial| {
-            const right = try evalValueExpr(ctx, partial.right);
-            return applyRightArg(ctx, partial.left, args, right);
+            const right = ctx.allocator.alloc(Value, partial.right.len) catch @panic("out of memory");
+            for (partial.right, 0..) |*expr, i| {
+                right[i] = try evalValueExpr(ctx, expr);
+            }
+            return applyRightArgs(ctx, partial.left, args, right);
         },
         .right_partial_apply => |partial| {
             const right = try evalRightFunc(ctx, partial.right, args);
-            return applyRightArg(ctx, partial.left, args, right);
+            return applyRightArgs(ctx, partial.left, args, &.{right});
         },
     }
 }
@@ -167,8 +170,10 @@ fn foldFuncExpr(allocator: std.mem.Allocator, func: *Expr.FuncExpr) EvalError!vo
             try foldFuncExpr(allocator, reduced);
         },
         .partial_apply => |partial| {
-            if (try tryFoldValueExpr(allocator, partial.right)) |value| {
-                partial.right.* = .{ .literal = value };
+            for (partial.right) |*expr| {
+                if (try tryFoldValueExpr(allocator, expr)) |value| {
+                    expr.* = .{ .literal = value };
+                }
             }
             try foldFuncExpr(allocator, partial.left);
         },
@@ -237,15 +242,15 @@ fn evalRightFunc(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []const Va
     };
 }
 
-fn applyRightArg(
+fn applyRightArgs(
     ctx: *EvalContext,
     func: *const Expr.FuncExpr,
     args: []const Value,
-    right: Value,
+    right: []const Value,
 ) EvalError!Value {
-    const combined = ctx.allocator.alloc(Value, args.len + 1) catch @panic("out of memory");
+    const combined = ctx.allocator.alloc(Value, args.len + right.len) catch @panic("out of memory");
     @memcpy(combined[0..args.len], args);
-    combined[args.len] = right;
+    @memcpy(combined[args.len..], right);
     return evalFuncInContext(ctx, func, combined);
 }
 
@@ -454,8 +459,31 @@ test "constant folding rewrites partial application constants before main eval" 
         else => return error.UnsupportedFunctionKind,
     };
 
-    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right.*);
-    try std.testing.expectEqual(@as(Value.Tag, .array), partial.right.literal);
+    try std.testing.expectEqual(@as(usize, 1), partial.right.len);
+    try std.testing.expectEqual(@as(Expr.ValueExpr.Tag, .literal), partial.right[0]);
+    try std.testing.expectEqual(@as(Value.Tag, .array), partial.right[0].literal);
+}
+
+test "eval chained comma partial application appends captured values in order" {
+    const allocator = std.testing.allocator;
+    const source = "strided,2,3";
+
+    var lexed = try @import("lex.zig").lex(allocator, source);
+    defer lexed.deinit(allocator);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = @import("parse.zig").Parser.init(arena.allocator(), source, lexed.tokens.items, lexed.line_offsets.items);
+    defer parser.deinit();
+    const file_ast = try parser.parseFile(arena.allocator());
+
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 7, .is_char = false } },
+    });
+
+    try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
+    try std.testing.expectEqual(@as(f64, 7), result.scalar.value);
 }
 
 test "eval monadic arrow function evaluates a value body with a bound parameter" {

@@ -67,6 +67,11 @@ pub fn sq(all: std.mem.Allocator, args: *[1]Value) Value {
     @panic("not implemented");
 }
 
+pub fn strided(_: std.mem.Allocator, args: *[3]Value) Value {
+    std.debug.print("strided args: {}, {}, {}\n", .{ args[0], args[1], args[2] });
+    return args[0];
+}
+
 test "sq squares scalar values" {
     const result = sq(std.testing.allocator, &.{
         .{ .scalar = .{ .value = -3, .is_char = false } },

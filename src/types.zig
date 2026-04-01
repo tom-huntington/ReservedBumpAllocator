@@ -70,7 +70,7 @@ pub const Expr = union(enum) {
         type: union(enum) {
             combinator: struct { op: Combinator, left: *FuncExpr, right: *FuncExpr },
             reduce: *FuncExpr,
-            partial_apply: struct { left: *FuncExpr, right: *ValueExpr },
+            partial_apply: struct { left: *FuncExpr, right: []ValueExpr },
             right_partial_apply: struct { left: *FuncExpr, right: *FuncExpr },
             scope: *FuncExpr,
             userFn: struct { left: []const u8, right: ?[]const u8, body: *Expr },

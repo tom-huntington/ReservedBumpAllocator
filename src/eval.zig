@@ -4,11 +4,6 @@ const types = @import("types.zig");
 const Expr = types.Expr;
 const Value = types.Value;
 
-pub const Args = union(enum) {
-    monad: [1]Value,
-    dyad: [2]Value,
-};
-
 pub const EvalError = error{
     ArityMismatch,
     UnsupportedFunctionKind,
@@ -39,29 +34,17 @@ pub fn foldFileConstants(allocator: std.mem.Allocator, file_ast: *parse.FileAst)
     try foldFuncExpr(allocator, file_ast.main);
 }
 
-pub fn evalFunc(allocator: std.mem.Allocator, func: *const Expr.FuncExpr, args: Args) EvalError!Value {
+pub fn evalFunc(allocator: std.mem.Allocator, func: *const Expr.FuncExpr, args: []const Value) EvalError!Value {
     var ctx = EvalContext.init(allocator);
     defer ctx.deinit();
     return evalFuncInContext(&ctx, func, args);
 }
 
-fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: Args) EvalError!Value {
+fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []const Value) EvalError!Value {
     switch (func.type) {
-        .builtin => |builtin| switch (builtin) {
-            .monad => |f| {
-                const monad_args = switch (args) {
-                    .monad => |monad_args| monad_args,
-                    .dyad => return error.ArityMismatch,
-                };
-                return f(ctx.allocator, monad_args[0]);
-            },
-            .dyad => |f| {
-                const dyad_args = switch (args) {
-                    .dyad => |dyad_args| dyad_args,
-                    .monad => return error.ArityMismatch,
-                };
-                return f(ctx.allocator, dyad_args[0], dyad_args[1]);
-            },
+        .builtin => |builtin| {
+            if (args.len != builtin.arity) return error.ArityMismatch;
+            return builtin.pointer(ctx.allocator, args);
         },
         .scope => |scoped| return evalFuncInContext(ctx, scoped, args),
         .userFn => |user_fn| return evalUserFunc(ctx, user_fn, args),
@@ -69,7 +52,7 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: Args) 
             switch (com.op) {
                 .B1, .B => {
                     const a = try evalFuncInContext(ctx, com.left, args);
-                    return evalFuncInContext(ctx, com.right, .{ .monad = .{a} });
+                    return evalFuncInContext(ctx, com.right, &.{a});
                 },
                 else => {
                     @panic("not implemented");
@@ -77,11 +60,8 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: Args) 
             }
         },
         .reduce => |reduced| {
-            const monad_args = switch (args) {
-                .monad => |monad_args| monad_args,
-                .dyad => return error.ArityMismatch,
-            };
-            return evalReduce(ctx, reduced, monad_args[0]);
+            if (args.len != 1) return error.ArityMismatch;
+            return evalReduce(ctx, reduced, args[0]);
         },
         .partial_apply => |partial| {
             const right = try evalValueExpr(ctx, partial.right);
@@ -94,23 +74,24 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: Args) 
     }
 }
 
-fn evalUserFunc(ctx: *EvalContext, user_fn: anytype, args: Args) EvalError!Value {
+fn evalUserFunc(ctx: *EvalContext, user_fn: anytype, args: []const Value) EvalError!Value {
     const old_left = ctx.bindings.get(user_fn.left);
     defer restoreBinding(ctx, user_fn.left, old_left);
 
-    switch (args) {
-        .monad => |monad_args| {
+    switch (args.len) {
+        1 => {
             if (user_fn.right != null) return error.ArityMismatch;
-            try putBinding(ctx, user_fn.left, monad_args[0]);
+            try putBinding(ctx, user_fn.left, args[0]);
         },
-        .dyad => |dyad_args| {
+        2 => {
             const right_name = user_fn.right orelse return error.ArityMismatch;
             const old_right = ctx.bindings.get(right_name);
             defer restoreBinding(ctx, right_name, old_right);
 
-            try putBinding(ctx, user_fn.left, dyad_args[0]);
-            try putBinding(ctx, right_name, dyad_args[1]);
+            try putBinding(ctx, user_fn.left, args[0]);
+            try putBinding(ctx, right_name, args[1]);
         },
+        else => return error.ArityMismatch,
     }
 
     return switch (user_fn.body.*) {
@@ -225,49 +206,47 @@ fn tryFoldValueExpr(allocator: std.mem.Allocator, expr: *Expr.ValueExpr) EvalErr
     };
 }
 
-fn evalArgs(ctx: *EvalContext, expr: *const Expr) EvalError!Args {
+fn evalArgs(ctx: *EvalContext, expr: *const Expr) EvalError![]const Value {
     return switch (expr.*) {
         .func => return error.UnsupportedValueKind,
         .value => |value_expr| switch (value_expr) {
-            .literal, .apply => .{ .monad = .{try evalExpr(ctx, expr)} },
-            .strand => |strand| .{
-                .dyad = .{
-                    try evalExpr(ctx, strand.left),
-                    try evalExpr(ctx, strand.right),
-                },
+            .literal, .apply => blk: {
+                const args = ctx.allocator.alloc(Value, 1) catch @panic("out of memory");
+                args[0] = try evalExpr(ctx, expr);
+                break :blk args;
+            },
+            .strand => |strand| blk: {
+                const args = ctx.allocator.alloc(Value, 2) catch @panic("out of memory");
+                args[0] = try evalExpr(ctx, strand.left);
+                args[1] = try evalExpr(ctx, strand.right);
+                break :blk args;
             },
         },
     };
 }
 
-fn evalRightFunc(ctx: *EvalContext, func: *const Expr.FuncExpr, args: Args) EvalError!Value {
-    return switch (args) {
-        .monad => |monad_args| evalFuncInContext(ctx, func, .{ .monad = monad_args }),
-        .dyad => |dyad_args| switch (func.arity) {
-            .dyad => evalFuncInContext(ctx, func, .{ .dyad = dyad_args }),
-            .monad => evalFuncInContext(ctx, func, .{ .monad = .{dyad_args[1]} }),
-            .value => error.ArityMismatch,
+fn evalRightFunc(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []const Value) EvalError!Value {
+    return switch (args.len) {
+        1 => evalFuncInContext(ctx, func, args),
+        2 => switch (func.arity) {
+            2 => evalFuncInContext(ctx, func, args),
+            1 => evalFuncInContext(ctx, func, args[1..2]),
+            else => error.ArityMismatch,
         },
+        else => error.ArityMismatch,
     };
 }
 
 fn applyRightArg(
     ctx: *EvalContext,
     func: *const Expr.FuncExpr,
-    args: Args,
+    args: []const Value,
     right: Value,
 ) EvalError!Value {
-    return switch (func.arity) {
-        .monad => evalFuncInContext(ctx, func, .{ .monad = .{right} }),
-        .dyad => {
-            const monad_args = switch (args) {
-                .monad => |monad_args| monad_args,
-                .dyad => return error.ArityMismatch,
-            };
-            return evalFuncInContext(ctx, func, .{ .dyad = .{ monad_args[0], right } });
-        },
-        .value => error.ArityMismatch,
-    };
+    const combined = ctx.allocator.alloc(Value, args.len + 1) catch @panic("out of memory");
+    @memcpy(combined[0..args.len], args);
+    combined[args.len] = right;
+    return evalFuncInContext(ctx, func, combined);
 }
 
 fn evalReduce(ctx: *EvalContext, func: *const Expr.FuncExpr, value: Value) EvalError!Value {
@@ -287,11 +266,9 @@ fn evalReduce(ctx: *EvalContext, func: *const Expr.FuncExpr, value: Value) EvalE
     };
 
     for (array.data[1..]) |item| {
-        acc = try evalFuncInContext(ctx, func, .{
-            .dyad = .{
-                acc,
-                .{ .scalar = .{ .value = item, .is_char = array.is_char } },
-            },
+        acc = try evalFuncInContext(ctx, func, &.{
+            acc,
+            .{ .scalar = .{ .value = item, .is_char = array.is_char } },
         });
     }
 
@@ -392,10 +369,8 @@ test "eval comma partial application fixes the right argument" {
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .monad = .{
-            .{ .scalar = .{ .value = 2, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 2, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
@@ -416,10 +391,8 @@ test "eval caret partial application transforms the right argument" {
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .monad = .{
-            .{ .scalar = .{ .value = 3, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 3, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
@@ -499,10 +472,8 @@ test "eval monadic arrow function evaluates a value body with a bound parameter"
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .monad = .{
-            .{ .scalar = .{ .value = 4, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 4, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
@@ -523,11 +494,9 @@ test "eval dyadic arrow function binds both parameters in a value body" {
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .dyad = .{
-            .{ .scalar = .{ .value = 2, .is_char = false } },
-            .{ .scalar = .{ .value = 3, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 2, .is_char = false } },
+        .{ .scalar = .{ .value = 3, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .array), result);
@@ -548,10 +517,8 @@ test "eval monadic arrow function tail-calls a function body" {
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .monad = .{
-            .{ .scalar = .{ .value = 5, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .scalar = .{ .value = 5, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);
@@ -572,10 +539,8 @@ test "eval slash reduce folds rank-1 arrays" {
     defer parser.deinit();
     const file_ast = try parser.parseFile(arena.allocator());
 
-    const result = try evalFunc(arena.allocator(), file_ast.main, .{
-        .monad = .{
-            .{ .array = .{ .data = &.{ 1, 2, 3, 4 }, .shape = &.{4}, .is_char = false } },
-        },
+    const result = try evalFunc(arena.allocator(), file_ast.main, &.{
+        .{ .array = .{ .data = &.{ 1, 2, 3, 4 }, .shape = &.{4}, .is_char = false } },
     });
 
     try std.testing.expectEqual(@as(Value.Tag, .scalar), result);

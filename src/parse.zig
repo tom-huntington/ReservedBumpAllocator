@@ -3,10 +3,10 @@ const builtins = @import("builtins.zig");
 const types = @import("types.zig");
 const Token = types.Token;
 const Value = types.Value;
-const Arity = types.Arity;
 const Expr = types.Expr;
 const TokenTag = types.TokenTag;
 const Combinator = types.Combinator;
+const Builtin = types.Builtin;
 
 pub const ConstDef = struct {
     name: []const u8,
@@ -112,14 +112,9 @@ pub const Parser = struct {
             switch (member_info) {
                 .@"fn" => {
                     const params = member_info.@"fn".params;
-                    if (params.len == 2) {
+                    if (builtinFromParams(params, member)) |builtin| {
                         const expr = try self.allocExpr(.{
-                            .func = .{ .arity = .monad, .type = .{ .builtin = .{ .monad = member } } },
-                        });
-                        try self.symbols.put(decl.name, .{ .expr = expr });
-                    } else if (params.len == 3) {
-                        const expr = try self.allocExpr(.{
-                            .func = .{ .arity = .dyad, .type = .{ .builtin = .{ .dyad = member } } },
+                            .func = .{ .arity = builtin.arity, .type = .{ .builtin = builtin } },
                         });
                         try self.symbols.put(decl.name, .{ .expr = expr });
                     }
@@ -329,7 +324,7 @@ pub const Parser = struct {
                 index.* += 1;
                 if (body.* != .func) return error.ExpectedFunction;
                 return self.allocExpr(.{
-                    .func = .{ .arity = .monad, .type = .{ .scope = &body.func } },
+                    .func = .{ .arity = 1, .type = .{ .scope = &body.func } },
                 });
             },
             .lbrace => {
@@ -341,29 +336,29 @@ pub const Parser = struct {
                 index.* += 1;
                 if (body.* != .func) return error.ExpectedFunction;
                 return self.allocExpr(.{
-                    .func = .{ .arity = .dyad, .type = .{ .scope = &body.func } },
+                    .func = .{ .arity = 2, .type = .{ .scope = &body.func } },
                 });
             },
             .backslash => {
                 const body = try self.parseExpr(index, end_index, 0, end_tag);
                 if (body.* != .func) return error.ExpectedFunction;
                 return self.allocExpr(.{
-                    .func = .{ .arity = .monad, .type = .{ .scope = &body.func } },
+                    .func = .{ .arity = 1, .type = .{ .scope = &body.func } },
                 });
             },
             .dbl_backslash => {
                 const body = try self.parseExpr(index, end_index, 0, end_tag);
                 if (body.* != .func) return error.ExpectedFunction;
                 return self.allocExpr(.{
-                    .func = .{ .arity = .dyad, .type = .{ .scope = &body.func } },
+                    .func = .{ .arity = 2, .type = .{ .scope = &body.func } },
                 });
             },
             .slash => {
                 const body = try self.parseExpr(index, end_index, 0, end_tag);
                 if (body.* != .func) return error.ExpectedFunction;
-                if (body.func.arity != .dyad) return error.ExpectedFunction;
+                if (body.func.arity != 2) return error.ExpectedFunction;
                 return self.allocExpr(.{
-                    .func = .{ .arity = .monad, .type = .{ .reduce = &body.func } },
+                    .func = .{ .arity = 1, .type = .{ .reduce = &body.func } },
                 });
             },
             else => return error.UnexpectedToken,
@@ -414,8 +409,8 @@ pub const Parser = struct {
         self.local_params.items.len = param_start;
 
         return self.allocExpr(.{
-            .func = .{
-                .arity = if (second_name == null) .monad else .dyad,
+                .func = .{
+                .arity = if (second_name == null) 1 else 2,
                 .type = .{ .userFn = .{ .left = first_name, .right = second_name, .body = body } },
             },
         });
@@ -446,10 +441,7 @@ pub const Parser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 if (right.* != .value) return error.ExpectedValue;
-                const arity: Arity = switch (left_func.arity) {
-                    .dyad => .monad,
-                    else => left_func.arity,
-                };
+                const arity = if (left_func.arity > 1) left_func.arity - 1 else left_func.arity;
                 return self.allocExpr(.{
                     .func = .{ .arity = arity, .type = .{ .partial_apply = .{ .left = &left.func, .right = &right.value } } },
                 });
@@ -468,7 +460,7 @@ pub const Parser = struct {
                     .func => |f| f,
                     .value => return error.ExpectedFunction,
                 };
-                const arity = if (left_func.arity == right_func.arity) left_func.arity else .dyad;
+                const arity = if (left_func.arity == right_func.arity) left_func.arity else 2;
                 const op = parseCombinator(tok) orelse return error.UnknownCombinator;
                 return self.allocExpr(.{
                     .func = .{ .arity = arity, .type = .{ .combinator = .{ .op = op, .left = &left.func, .right = &right.func } } },
@@ -480,10 +472,7 @@ pub const Parser = struct {
                     .value => return error.ExpectedFunction,
                 };
                 if (right.* != .func) return error.ExpectedFunction;
-                const arity: Arity = switch (left_func.arity) {
-                    .dyad => .monad,
-                    else => left_func.arity,
-                };
+                const arity = if (left_func.arity > 1) left_func.arity - 1 else left_func.arity;
                 return self.allocExpr(.{
                     .func = .{ .arity = arity, .type = .{ .right_partial_apply = .{ .left = &left.func, .right = &right.func } } },
                 });
@@ -509,6 +498,33 @@ fn infixInfo(tag: TokenTag) ?InfixInfo {
         .caret => .{ .lbp = 55, .rbp = 56 },
         else => null,
     };
+}
+
+fn builtinFromParams(comptime params: anytype, comptime member: anytype) ?Builtin {
+    if (params.len != 2) return null;
+    const args_type = params[1].type orelse return null;
+    const args_info = @typeInfo(args_type);
+    if (args_info != .pointer) return null;
+    if (args_info.pointer.size != .one) return null;
+    const child_info = @typeInfo(args_info.pointer.child);
+    if (child_info != .array) return null;
+    if (child_info.array.child != Value) return null;
+
+    const arity: u32 = @intCast(child_info.array.len);
+    return .{
+        .arity = arity,
+        .pointer = makeBuiltinWrapper(arity, member),
+    };
+}
+
+fn makeBuiltinWrapper(comptime arity: u32, comptime member: anytype) *const fn (std.mem.Allocator, []const Value) Value {
+    return &struct {
+        fn call(allocator: std.mem.Allocator, args: []const Value) Value {
+            std.debug.assert(args.len == arity);
+            const typed_args: *const [arity]Value = @ptrCast(args.ptr);
+            return member(allocator, @constCast(typed_args));
+        }
+    }.call;
 }
 
 fn tokenStartsExpr(tag: TokenTag) bool {
@@ -621,7 +637,7 @@ test "parse monadic arrow function with local parameter references" {
     const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
 
     try std.testing.expect(expr.* == .func);
-    try std.testing.expectEqual(@as(Arity, .monad), expr.func.arity);
+    try std.testing.expectEqual(@as(u32, 1), expr.func.arity);
     const user_fn = expr.func.type.userFn;
     try std.testing.expectEqualStrings("x", user_fn.left);
     try std.testing.expect(user_fn.right == null);
@@ -645,7 +661,7 @@ test "parse slash reduce as monadic function" {
     const expr = try parser.parseExpr(&index, lexed.tokens.items.len, 0, null);
 
     try std.testing.expect(expr.* == .func);
-    try std.testing.expectEqual(@as(Arity, .monad), expr.func.arity);
+    try std.testing.expectEqual(@as(u32, 1), expr.func.arity);
     try std.testing.expect(expr.func.type == .reduce);
-    try std.testing.expectEqual(@as(Arity, .dyad), expr.func.type.reduce.arity);
+    try std.testing.expectEqual(@as(u32, 2), expr.func.type.reduce.arity);
 }

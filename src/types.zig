@@ -36,9 +36,6 @@ pub const Value = union(enum) {
     ident: []const u8,
 };
 
-pub const MonadFn = *const fn (std.mem.Allocator, Value) Value;
-pub const DyadFn = *const fn (std.mem.Allocator, Value, Value) Value;
-
 pub const Combinator = enum {
     B,
     B1,
@@ -57,6 +54,11 @@ pub const Combinator = enum {
     Phi1,
 };
 
+pub const Builtin = struct {
+    arity: u32,
+    pointer: *const fn (std.mem.Allocator, []const Value) Value,
+};
+
 pub const PartialApply = enum { comma, caret };
 
 pub const Expr = union(enum) {
@@ -64,7 +66,7 @@ pub const Expr = union(enum) {
     func: FuncExpr,
 
     pub const FuncExpr = struct {
-        arity: Arity,
+        arity: u32,
         type: union(enum) {
             combinator: struct { op: Combinator, left: *FuncExpr, right: *FuncExpr },
             reduce: *FuncExpr,
@@ -72,7 +74,7 @@ pub const Expr = union(enum) {
             right_partial_apply: struct { left: *FuncExpr, right: *FuncExpr },
             scope: *FuncExpr,
             userFn: struct { left: []const u8, right: ?[]const u8, body: *Expr },
-            builtin: union(enum) { monad: MonadFn, dyad: DyadFn },
+            builtin: Builtin,
         },
     };
 

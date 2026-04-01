@@ -51,9 +51,9 @@ pub fn main() !void {
         .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..], .is_char = false } },
     };
     const result = switch (file_ast.main.arity) {
-        .dyad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .dyad = args }),
-        .monad => try eval.evalFunc(ast_alloc, file_ast.main, .{ .monad = .{args[0]} }),
-        .value => return error.ArityMismatch,
+        2 => try eval.evalFunc(ast_alloc, file_ast.main, args[0..2]),
+        1 => try eval.evalFunc(ast_alloc, file_ast.main, args[0..1]),
+        else => return error.ArityMismatch,
     };
     stringprint.printfmt("result: {}\n", .{result});
 }

@@ -2,7 +2,9 @@ const std = @import("std");
 const types = @import("types.zig");
 const Value = types.Value;
 
-pub fn add(all: std.mem.Allocator, a: Value, b: Value) Value {
+pub fn add(all: std.mem.Allocator, args: *[2]Value) Value {
+    const a = args[0];
+    const b = args[1];
     switch (a) {
         .scalar => |as| {
             switch (b) {
@@ -36,12 +38,15 @@ pub fn add(all: std.mem.Allocator, a: Value, b: Value) Value {
     }
     @panic("not implemented");
 }
-pub fn mul(all: std.mem.Allocator, a: Value, b: Value) Value {
+pub fn mul(all: std.mem.Allocator, args: *[2]Value) Value {
+    const a = args[0];
+    const b = args[1];
     _ = a;
     _ = all;
     return b;
 }
-pub fn sq(all: std.mem.Allocator, a: Value) Value {
+pub fn sq(all: std.mem.Allocator, args: *[1]Value) Value {
+    const a = args[0];
     switch (a) {
         .scalar => |scalar| {
             const val = scalar.value * scalar.value;
@@ -63,7 +68,9 @@ pub fn sq(all: std.mem.Allocator, a: Value) Value {
 }
 
 test "sq squares scalar values" {
-    const result = sq(std.testing.allocator, .{ .scalar = .{ .value = -3, .is_char = false } });
+    const result = sq(std.testing.allocator, &.{
+        .{ .scalar = .{ .value = -3, .is_char = false } },
+    });
 
     try std.testing.expectEqual(@as(types.Value.Tag, .scalar), result);
     try std.testing.expectEqual(@as(f64, 9), result.scalar.value);
@@ -74,19 +81,17 @@ test "add adds same-shape arrays elementwise" {
     const allocator = std.testing.allocator;
     const result = add(
         allocator,
-        .{
-            .array = .{
+        &.{
+            .{ .array = .{
                 .data = &.{ 1, 2, 3 },
                 .shape = &.{3},
                 .is_char = false,
-            },
-        },
-        .{
-            .array = .{
+            } },
+            .{ .array = .{
                 .data = &.{ 4, 5, 6 },
                 .shape = &.{3},
                 .is_char = false,
-            },
+            } },
         },
     );
     defer switch (result) {
@@ -113,7 +118,7 @@ test "sq squares arrays elementwise" {
         },
     };
 
-    const result = sq(allocator, input);
+    const result = sq(allocator, &.{input});
     defer switch (result) {
         .array => |array| {
             allocator.free(array.data);

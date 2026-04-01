@@ -61,5 +61,5 @@ pub fn main() !void {
         else => return error.ArityMismatch,
     };
     const rendered = try format.valueString(ast_alloc, result);
-    std.debug.print("result: {s}\n", .{rendered});
+    std.debug.print("{s}\n", .{rendered});
 }

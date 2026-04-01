@@ -55,7 +55,6 @@ pub fn main() !void {
         1 => try eval.evalFunc(ast_alloc, file_ast.main, args[0..1]),
         else => return error.ArityMismatch,
     };
-    const formatted = try format.allocPrint(allocator, result);
-    defer allocator.free(formatted);
-    std.debug.print("result: {s}\n", .{formatted});
+    const rendered = try format.valueString(ast_alloc, result);
+    std.debug.print("result: {s}\n", .{rendered});
 }

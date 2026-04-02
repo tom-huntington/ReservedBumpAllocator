@@ -65,7 +65,8 @@ pub fn main() !void {
 
     //std.debug.print("{f}", .{std.zig.fmtString(input)});
     const source =
-        \\  not_eq,@\n )s partition
+        \\  not_eq,@\n 
+        //)s partition
     ;
     std.debug.print("soure: {s}\n", .{source});
 

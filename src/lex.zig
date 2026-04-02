@@ -138,13 +138,10 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
             },
             '@' => {
                 if (i + 1 >= line.len) return error.UnexpectedChar;
-                const literal_len: usize = if (line[i + 1] == '\\')
-                    blk: {
-                        if (i + 2 >= line.len) return error.UnexpectedChar;
-                        break :blk 3;
-                    }
-                else
-                    2;
+                const literal_len: usize = if (line[i + 1] == '\\') blk: {
+                    if (i + 2 >= line.len) return error.UnexpectedChar;
+                    break :blk 3;
+                } else 2;
                 try tokens.append(allocator, .{
                     .tag = .char_lit,
                     .start = start,

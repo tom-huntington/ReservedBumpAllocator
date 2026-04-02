@@ -1,4 +1,5 @@
 const std = @import("std");
+const hofs = @import("hofs.zig");
 const types = @import("types.zig");
 const Token = types.Token;
 const TokenTag = types.TokenTag;
@@ -122,10 +123,6 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                     i += 1;
                 }
             },
-            '/' => {
-                try tokens.append(allocator, .{ .tag = .hof, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
-                i += 1;
-            },
             '=' => {
                 try tokens.append(allocator, .{ .tag = .equal, .start = start, .end = start + 1, .lexeme = line[i .. i + 1] });
                 i += 1;
@@ -165,7 +162,12 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                     var j = i;
                     while (j < line.len and (std.ascii.isAlphanumeric(line[j]) or line[j] == '_')) : (j += 1) {}
                     const lexeme = line[i..j];
-                    const tag: TokenTag = if (std.mem.eql(u8, lexeme, "table")) .table else .ident;
+                    const tag: TokenTag = if (std.mem.eql(u8, lexeme, "table"))
+                        .table
+                    else if (hofs.isHofName(lexeme))
+                        .hof
+                    else
+                        .ident;
                     try tokens.append(allocator, .{ .tag = tag, .start = start, .end = base + j, .lexeme = lexeme });
                     i = j;
                 } else {

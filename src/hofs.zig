@@ -3,6 +3,16 @@ const types = @import("types.zig");
 const Expr = types.Expr;
 const Value = types.Value;
 
+pub fn isHofName(name: []const u8) bool {
+    inline for (@typeInfo(@This()).@"struct".decls) |decl| {
+        const member = @field(@This(), decl.name);
+        if (isHofFunction(member) and std.mem.eql(u8, name, decl.name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub fn reduce(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Value {
     const array = switch (args[0]) {
         .array => |array| array,
@@ -127,4 +137,22 @@ fn materializeHomogeneousResults(all: std.mem.Allocator, items: []const Value) V
     }
 
     return .{ .array = .{ .data = data, .shape = shape, .is_char = is_char } };
+}
+
+fn isHofFunction(comptime member: anytype) bool {
+    const member_info = @typeInfo(@TypeOf(member));
+    if (member_info != .@"fn") return false;
+
+    const params = member_info.@"fn".params;
+    if (params.len != 3) return false;
+    if ((params[2].type orelse return false) != Expr.FuncExpr) return false;
+
+    const args_type = params[1].type orelse return false;
+    const args_info = @typeInfo(args_type);
+    if (args_info != .pointer) return false;
+    if (args_info.pointer.size != .one) return false;
+
+    const child_info = @typeInfo(args_info.pointer.child);
+    if (child_info != .array) return false;
+    return child_info.array.child == Value;
 }

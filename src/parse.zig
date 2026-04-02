@@ -53,6 +53,7 @@ const ParseError = error{
     MissingMain,
     MainMustBeFunction,
     InvalidConst,
+    InvalidCharacterLiteral,
 } || std.fmt.ParseFloatError || std.fmt.ParseIntError || std.mem.Allocator.Error;
 
 pub const Parser = struct {
@@ -642,7 +643,7 @@ pub const Parser = struct {
                 .is_char = false,
             } },
             .char_lit => .{ .scalar = .{
-                .value = @floatFromInt(tok.lexeme[1]),
+                .value = @floatFromInt(try parseCharToken(tok.lexeme)),
                 .is_char = true,
             } },
             .raw_string => .{ .array = .{
@@ -750,6 +751,22 @@ pub const Parser = struct {
             .caret => return error.UnexpectedToken,
             else => return error.UnexpectedToken,
         }
+    }
+
+    fn parseCharToken(tok: []const u8) ParseError!u21 {
+        if (tok.len < 2 or tok[0] != '@') return error.InvalidCharacterLiteral;
+
+        var buf: [16]u8 = undefined;
+        if (tok.len + 1 > buf.len) return error.InvalidCharacterLiteral;
+
+        buf[0] = '\'';
+        @memcpy(buf[1 .. 1 + tok.len - 1], tok[1..]);
+        buf[tok.len] = '\'';
+
+        return switch (std.zig.parseCharLiteral(buf[0 .. tok.len + 1])) {
+            .success => |codepoint| codepoint,
+            .failure => error.InvalidCharacterLiteral,
+        };
     }
 
     fn allocCombinatorExpr(self: *Parser, op: Combinator, first_arg: *Expr.FuncExpr, remaining_args: []*Expr.FuncExpr) ParseError!*Expr {

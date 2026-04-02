@@ -138,8 +138,20 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
             },
             '@' => {
                 if (i + 1 >= line.len) return error.UnexpectedChar;
-                try tokens.append(allocator, .{ .tag = .char_lit, .start = start, .end = start + 2, .lexeme = line[i .. i + 2] });
-                i += 2;
+                const literal_len: usize = if (line[i + 1] == '\\')
+                    blk: {
+                        if (i + 2 >= line.len) return error.UnexpectedChar;
+                        break :blk 3;
+                    }
+                else
+                    2;
+                try tokens.append(allocator, .{
+                    .tag = .char_lit,
+                    .start = start,
+                    .end = start + literal_len,
+                    .lexeme = line[i .. i + literal_len],
+                });
+                i += literal_len;
             },
             else => {
                 if (std.ascii.isDigit(c)) {
@@ -154,7 +166,7 @@ fn lexLine(allocator: std.mem.Allocator, tokens: *std.ArrayList(Token), line: []
                     i = j;
                 } else if (std.ascii.isAlphabetic(c)) {
                     var j = i;
-                    while (j < line.len and std.ascii.isAlphabetic(line[j])) : (j += 1) {}
+                    while (j < line.len and (std.ascii.isAlphanumeric(line[j]) or line[j] == '_')) : (j += 1) {}
                     const lexeme = line[i..j];
                     const tag: TokenTag = if (std.mem.eql(u8, lexeme, "table")) .table else .ident;
                     try tokens.append(allocator, .{ .tag = tag, .start = start, .end = base + j, .lexeme = lexeme });

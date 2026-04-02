@@ -65,7 +65,7 @@ pub fn main() !void {
 
     //std.debug.print("{f}", .{std.zig.fmtString(input)});
     const source =
-        \\ strided,3,2
+        \\ not_eq,@\n
     ;
     std.debug.print("soure: {s}\n", .{source});
 

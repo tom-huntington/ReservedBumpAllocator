@@ -51,6 +51,14 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
                     }
                     return value;
                 },
+                .S => {
+                    //
+                    const value = try evalFuncInContext(ctx, com.first_arg, args);
+                    //can you assert that both com.remaining_args and args are size 1
+                    const args2 = [_]Value{ args[0], value };
+                    const value2 = try evalFuncInContext(ctx, com.remaining_args[0], &args2);
+                    return value2;
+                },
                 else => {
                     @panic("not implemented");
                 },

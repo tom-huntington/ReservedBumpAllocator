@@ -113,3 +113,33 @@ pub fn strided(all: std.mem.Allocator, args: *[3]Value) Value {
 
     return .{ .array = .{ .data = data, .shape = shape, .is_char = array.is_char } };
 }
+
+pub fn not_eq(all: std.mem.Allocator, args: *[2]Value) Value {
+    const rhs = switch (args[1]) {
+        .scalar => |scalar| scalar,
+        else => @panic("not_eq expects args[1] to be scalar"),
+    };
+
+    switch (args[0]) {
+        .scalar => |lhs| {
+            return .{ .scalar = .{
+                .value = if (lhs.value != rhs.value) 1 else 0,
+                .is_char = false,
+            } };
+        },
+        .array => |lhs| {
+            const data = all.alloc(f64, lhs.data.len) catch @panic("out of memory");
+            const shape = all.dupe(u32, lhs.shape) catch @panic("out of memory");
+
+            for (lhs.data, 0..) |item, i| {
+                data[i] = if (item != rhs.value) 1 else 0;
+            }
+
+            return .{ .array = .{
+                .data = data,
+                .shape = shape,
+                .is_char = false,
+            } };
+        },
+    }
+}

@@ -39,31 +39,65 @@ pub fn reduce(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Va
     return acc;
 }
 
-pub fn partition(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Value {
-    const mask = switch (args[0]) {
-        .array => |array| array,
+pub fn partition(all: std.mem.Allocator, args: *[2]Value, fn_arg: Expr.FuncExpr) Value {
+    const array = switch (args[0]) {
+        .array => |arr| arr,
+        else => @panic("partition expects an array"),
+    };
+    const mask = switch (args[1]) {
+        .array => |arr| arr,
         else => @panic("partition expects an array"),
     };
 
-    if (mask.shape.len != 1) @panic("partition only supports rank-1 arrays");
+    if (array.shape.len != 1) @panic("not implemented");
+    if (!std.mem.eql(u32, array.shape, mask.shape)) @panic("not implemented");
+
+    var labels: std.ArrayList(f64) = .empty;
+    defer labels.deinit(all);
+
+    var counts: std.ArrayList(usize) = .empty;
+    defer counts.deinit(all);
+
+    for (mask.data) |label| {
+        if (label == 0) continue;
+
+        if (indexOfScalar(f64, labels.items, label)) |i| {
+            counts.items[i] += 1;
+        } else {
+            labels.append(all, label) catch @panic("out of memory");
+            counts.append(all, 1) catch @panic("out of memory");
+        }
+    }
+
+    if (counts.items.len > 1) {
+        const group_len = counts.items[0];
+        for (counts.items[1..]) |count| {
+            if (count != group_len) @panic("not implemented");
+        }
+    }
 
     var results: std.ArrayList(Value) = .empty;
     defer results.deinit(all);
 
-    var start: usize = 0;
-    while (start < mask.data.len) {
-        while (start < mask.data.len and mask.data[start] == 0) : (start += 1) {}
-        if (start >= mask.data.len) break;
+    for (labels.items, counts.items) |label, group_len| {
+        const group_data = all.alloc(f64, group_len) catch @panic("out of memory");
+        const group_shape = all.alloc(u32, 1) catch @panic("out of memory");
+        group_shape[0] = @intCast(group_len);
 
-        var end = start + 1;
-        while (end < mask.data.len and mask.data[end] != 0) : (end += 1) {}
+        var group_index: usize = 0;
+        for (mask.data, array.data) |mask_item, array_item| {
+            if (mask_item != label) continue;
+            group_data[group_index] = array_item;
+            group_index += 1;
+        }
 
-        var group_shape = [_]u32{@intCast(end - start)};
+        std.debug.assert(group_index == group_len);
+
         const group = Value{
             .array = .{
-                .data = mask.data[start..end],
-                .shape = group_shape[0..],
-                .is_char = mask.is_char,
+                .data = group_data,
+                .shape = group_shape,
+                .is_char = array.is_char,
             },
         };
 
@@ -71,7 +105,6 @@ pub fn partition(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr)
             @panic("partition function evaluation failed");
         };
         results.append(all, result) catch @panic("out of memory");
-        start = end;
     }
 
     if (results.items.len == 0) {
@@ -137,6 +170,13 @@ fn materializeHomogeneousResults(all: std.mem.Allocator, items: []const Value) V
     }
 
     return .{ .array = .{ .data = data, .shape = shape, .is_char = is_char } };
+}
+
+fn indexOfScalar(comptime T: type, haystack: []const T, needle: T) ?usize {
+    for (haystack, 0..) |item, i| {
+        if (item == needle) return i;
+    }
+    return null;
 }
 
 fn isHofFunction(comptime member: anytype) bool {

@@ -93,6 +93,7 @@ pub fn main() !void {
         1 => try eval.evalFunc(ast_alloc, file_ast.main, args[2..3]),
         else => return error.ArityMismatch,
     };
-    const rendered = try format.valueString(ast_alloc, result);
-    std.debug.print("{s}\n", .{rendered});
+    //const rendered = try format.valueString(ast_alloc, result);
+    //std.debug.print("{s}\n", .{rendered});
+    std.debug.print("{}\n", .{result});
 }

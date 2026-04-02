@@ -418,7 +418,7 @@ pub const Parser = struct {
                 const hof = self.hofs.get(tok.lexeme) orelse return error.UnexpectedToken;
                 const body = try self.parseExpr(index, end_index, 0, end_tag);
                 if (body.* != .func) return error.ExpectedFunction;
-                if (body.func.arity != 2) return error.ExpectedFunction;
+                //if (body.func.arity != 2) return error.ExpectedFunction;
                 return self.allocExpr(.{
                     .func = .{ .arity = hof.arity, .type = .{ .hof = .{
                         .arity = hof.arity,

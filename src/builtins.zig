@@ -143,3 +143,20 @@ pub fn not_eq(all: std.mem.Allocator, args: *[2]Value) Value {
         },
     }
 }
+
+pub fn first(all: std.mem.Allocator, args: *[1]Value) Value {
+    _ = all;
+
+    const array = switch (args[0]) {
+        .array => |array| array,
+        else => @panic("first expects an array"),
+    };
+
+    if (array.shape.len != 1) @panic("first only supports rank-1 arrays");
+    if (array.data.len == 0) @panic("first requires a non-empty array");
+
+    return .{ .scalar = .{
+        .value = array.data[0],
+        .is_char = array.is_char,
+    } };
+}

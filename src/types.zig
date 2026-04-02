@@ -55,6 +55,25 @@ pub const Combinator = enum {
     X,
     Xi,
     Phi1,
+
+    pub fn arity(self: Combinator) u32 {
+        return switch (self) {
+            .B, .B1, .S => 1,
+            .Sig,
+            .D,
+            .Delta,
+            .Phi,
+            .Psi,
+            .D1,
+            .D2,
+            .N,
+            .V,
+            .X,
+            .Xi,
+            .Phi1,
+            => std.debug.panic("TODO: define arity for combinator {s}", .{@tagName(self)}),
+        };
+    }
 };
 
 pub const Builtin = struct {

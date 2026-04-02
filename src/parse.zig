@@ -770,15 +770,8 @@ pub const Parser = struct {
     }
 
     fn allocCombinatorExpr(self: *Parser, op: Combinator, first_arg: *Expr.FuncExpr, remaining_args: []*Expr.FuncExpr) ParseError!*Expr {
-        var arity = first_arg.arity;
-        for (remaining_args) |arg| {
-            if (arg.arity != arity) {
-                arity = 2;
-                break;
-            }
-        }
         return self.allocExpr(.{
-            .func = .{ .arity = arity, .type = .{ .combinator = .{
+            .func = .{ .arity = op.arity(), .type = .{ .combinator = .{
                 .op = op,
                 .first_arg = first_arg,
                 .remaining_args = remaining_args,

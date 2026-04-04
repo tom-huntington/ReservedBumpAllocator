@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const posix = std.posix;
 const windows = std.os.windows;
 
 const Allocator = std.mem.Allocator;
@@ -16,20 +17,33 @@ pub const ReservedBumpAllocator = struct {
     pub const Error = error{
         OutOfMemory,
         UnsupportedPlatform,
-    } || windows.VirtualAllocError;
+    } || windows.VirtualAllocError || posix.MMapError || posix.MProtectError;
 
     pub fn init(reserved_len: usize) Error!ReservedBumpAllocator {
-        if (builtin.os.tag != .windows) return error.UnsupportedPlatform;
         if (reserved_len == 0) return error.OutOfMemory;
 
         const page_size = std.heap.pageSize();
         const reserved_len_aligned = mem.alignForward(usize, reserved_len, page_size);
-        const raw_ptr = try windows.VirtualAlloc(
-            null,
-            reserved_len_aligned,
-            windows.MEM_RESERVE,
-            windows.PAGE_NOACCESS,
-        );
+        const raw_ptr = switch (builtin.os.tag) {
+            .windows => try windows.VirtualAlloc(
+                null,
+                reserved_len_aligned,
+                windows.MEM_RESERVE,
+                windows.PAGE_NOACCESS,
+            ),
+            .linux => blk: {
+                const mapped = try posix.mmap(
+                    null,
+                    reserved_len_aligned,
+                    posix.PROT.NONE,
+                    .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+                    -1,
+                    0,
+                );
+                break :blk mapped.ptr;
+            },
+            else => return error.UnsupportedPlatform,
+        };
 
         return .{
             .base = @ptrCast(raw_ptr),
@@ -41,7 +55,11 @@ pub const ReservedBumpAllocator = struct {
     }
 
     pub fn deinit(self: *ReservedBumpAllocator) void {
-        windows.VirtualFree(self.base, 0, windows.MEM_RELEASE);
+        switch (builtin.os.tag) {
+            .windows => windows.VirtualFree(self.base, 0, windows.MEM_RELEASE),
+            .linux => posix.munmap(@alignCast(self.base[0..self.reserved_len])),
+            else => unreachable,
+        }
         self.* = undefined;
     }
 
@@ -86,14 +104,23 @@ pub const ReservedBumpAllocator = struct {
         if (needed <= self.committed_len) return;
         if (needed > self.reserved_len) return error.OutOfMemory;
 
-        const commit_ptr: ?*anyopaque = @ptrCast(self.base + self.committed_len);
         const commit_len = needed - self.committed_len;
-        _ = try windows.VirtualAlloc(
-            commit_ptr,
-            commit_len,
-            windows.MEM_COMMIT,
-            windows.PAGE_READWRITE,
-        );
+        switch (builtin.os.tag) {
+            .windows => {
+                const commit_ptr: ?*anyopaque = @ptrCast(self.base + self.committed_len);
+                _ = try windows.VirtualAlloc(
+                    commit_ptr,
+                    commit_len,
+                    windows.MEM_COMMIT,
+                    windows.PAGE_READWRITE,
+                );
+            },
+            .linux => try posix.mprotect(
+                @alignCast(self.base[self.committed_len..needed]),
+                posix.PROT.READ | posix.PROT.WRITE,
+            ),
+            else => return error.UnsupportedPlatform,
+        }
         self.committed_len = needed;
     }
 
@@ -179,7 +206,10 @@ fn sliceContainsSlice(container: []const u8, slice: []const u8) bool {
 }
 
 test "reserved bump allocator commits pages on demand" {
-    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    switch (builtin.os.tag) {
+        .windows, .linux => {},
+        else => return error.SkipZigTest,
+    }
 
     var allocator_impl = try ReservedBumpAllocator.init(64 * 1024);
     defer allocator_impl.deinit();
@@ -200,7 +230,10 @@ test "reserved bump allocator commits pages on demand" {
 }
 
 test "reserved bump allocator reuses last allocation space" {
-    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    switch (builtin.os.tag) {
+        .windows, .linux => {},
+        else => return error.SkipZigTest,
+    }
 
     var allocator_impl = try ReservedBumpAllocator.init(64 * 1024);
     defer allocator_impl.deinit();

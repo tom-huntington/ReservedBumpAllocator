@@ -31,7 +31,7 @@ pub const ReservedBumpAllocator = struct {
                 windows.MEM_RESERVE,
                 windows.PAGE_NOACCESS,
             ),
-            .linux => blk: {
+            .linux, .macos => blk: {
                 const mapped = try posix.mmap(
                     null,
                     reserved_len_aligned,
@@ -57,7 +57,7 @@ pub const ReservedBumpAllocator = struct {
     pub fn deinit(self: *ReservedBumpAllocator) void {
         switch (builtin.os.tag) {
             .windows => windows.VirtualFree(self.base, 0, windows.MEM_RELEASE),
-            .linux => posix.munmap(@alignCast(self.base[0..self.reserved_len])),
+            .linux, .macos => posix.munmap(@alignCast(self.base[0..self.reserved_len])),
             else => unreachable,
         }
         self.* = undefined;
@@ -115,7 +115,7 @@ pub const ReservedBumpAllocator = struct {
                     windows.PAGE_READWRITE,
                 );
             },
-            .linux => try posix.mprotect(
+            .linux, .macos => try posix.mprotect(
                 @alignCast(self.base[self.committed_len..needed]),
                 posix.PROT.READ | posix.PROT.WRITE,
             ),
@@ -207,7 +207,7 @@ fn sliceContainsSlice(container: []const u8, slice: []const u8) bool {
 
 test "reserved bump allocator commits pages on demand" {
     switch (builtin.os.tag) {
-        .windows, .linux => {},
+        .windows, .linux, .macos => {},
         else => return error.SkipZigTest,
     }
 
@@ -231,7 +231,7 @@ test "reserved bump allocator commits pages on demand" {
 
 test "reserved bump allocator reuses last allocation space" {
     switch (builtin.os.tag) {
-        .windows, .linux => {},
+        .windows, .linux, .macos => {},
         else => return error.SkipZigTest,
     }
 

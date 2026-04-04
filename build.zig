@@ -39,6 +39,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const reserved_buffer_allocator = b.dependency("reservedBufferAllocator", .{});
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -77,6 +79,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "quiver", .module = mod },
+                .{ .name = "ReservedBumpAllocator", .module = reserved_buffer_allocator.module("ReservedBumpAllocator") },
             },
         }),
     });

@@ -1,0 +1,218 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const windows = std.os.windows;
+
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
+const mem = std.mem;
+
+pub const ReservedBumpAllocator = struct {
+    base: [*]u8,
+    reserved_len: usize,
+    committed_len: usize,
+    end_index: usize,
+    page_size: usize,
+
+    pub const Error = error{
+        OutOfMemory,
+        UnsupportedPlatform,
+    } || windows.VirtualAllocError;
+
+    pub fn init(reserved_len: usize) Error!ReservedBumpAllocator {
+        if (builtin.os.tag != .windows) return error.UnsupportedPlatform;
+        if (reserved_len == 0) return error.OutOfMemory;
+
+        const page_size = std.heap.pageSize();
+        const reserved_len_aligned = mem.alignForward(usize, reserved_len, page_size);
+        const raw_ptr = try windows.VirtualAlloc(
+            null,
+            reserved_len_aligned,
+            windows.MEM_RESERVE,
+            windows.PAGE_NOACCESS,
+        );
+
+        return .{
+            .base = @ptrCast(raw_ptr),
+            .reserved_len = reserved_len_aligned,
+            .committed_len = 0,
+            .end_index = 0,
+            .page_size = page_size,
+        };
+    }
+
+    pub fn deinit(self: *ReservedBumpAllocator) void {
+        windows.VirtualFree(self.base, 0, windows.MEM_RELEASE);
+        self.* = undefined;
+    }
+
+    pub fn allocator(self: *ReservedBumpAllocator) Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .remap = remap,
+                .free = free,
+            },
+        };
+    }
+
+    pub fn reset(self: *ReservedBumpAllocator) void {
+        self.end_index = 0;
+    }
+
+    pub fn committedBytes(self: *const ReservedBumpAllocator) usize {
+        return self.committed_len;
+    }
+
+    pub fn reservedBytes(self: *const ReservedBumpAllocator) usize {
+        return self.reserved_len;
+    }
+
+    pub fn ownsPtr(self: *const ReservedBumpAllocator, ptr: [*]u8) bool {
+        return sliceContainsPtr(self.base[0..self.reserved_len], ptr);
+    }
+
+    pub fn ownsSlice(self: *const ReservedBumpAllocator, slice: []u8) bool {
+        return sliceContainsSlice(self.base[0..self.reserved_len], slice);
+    }
+
+    pub fn isLastAllocation(self: *const ReservedBumpAllocator, buf: []u8) bool {
+        return @intFromPtr(buf.ptr) + buf.len == @intFromPtr(self.base) + self.end_index;
+    }
+
+    fn ensureCommitted(self: *ReservedBumpAllocator, end_index: usize) Error!void {
+        const needed = mem.alignForward(usize, end_index, self.page_size);
+        if (needed <= self.committed_len) return;
+        if (needed > self.reserved_len) return error.OutOfMemory;
+
+        const commit_ptr: ?*anyopaque = @ptrCast(self.base + self.committed_len);
+        const commit_len = needed - self.committed_len;
+        _ = try windows.VirtualAlloc(
+            commit_ptr,
+            commit_len,
+            windows.MEM_COMMIT,
+            windows.PAGE_READWRITE,
+        );
+        self.committed_len = needed;
+    }
+
+    fn alloc(ctx: *anyopaque, n: usize, alignment: mem.Alignment, ra: usize) ?[*]u8 {
+        const self: *ReservedBumpAllocator = @ptrCast(@alignCast(ctx));
+        _ = ra;
+
+        const ptr_align = alignment.toByteUnits();
+        const adjust_off = mem.alignPointerOffset(self.base + self.end_index, ptr_align) orelse return null;
+        const adjusted_index = self.end_index + adjust_off;
+        const new_end_index = adjusted_index + n;
+        if (new_end_index > self.reserved_len) return null;
+
+        self.ensureCommitted(new_end_index) catch return null;
+        self.end_index = new_end_index;
+        return self.base + adjusted_index;
+    }
+
+    fn resize(
+        ctx: *anyopaque,
+        buf: []u8,
+        alignment: mem.Alignment,
+        new_size: usize,
+        return_address: usize,
+    ) bool {
+        const self: *ReservedBumpAllocator = @ptrCast(@alignCast(ctx));
+        _ = alignment;
+        _ = return_address;
+        assert(@inComptime() or self.ownsSlice(buf));
+
+        if (!self.isLastAllocation(buf)) {
+            return new_size <= buf.len;
+        }
+
+        if (new_size <= buf.len) {
+            self.end_index -= buf.len - new_size;
+            return true;
+        }
+
+        const new_end_index = self.end_index + (new_size - buf.len);
+        if (new_end_index > self.reserved_len) return false;
+
+        self.ensureCommitted(new_end_index) catch return false;
+        self.end_index = new_end_index;
+        return true;
+    }
+
+    fn remap(
+        ctx: *anyopaque,
+        memory: []u8,
+        alignment: mem.Alignment,
+        new_len: usize,
+        return_address: usize,
+    ) ?[*]u8 {
+        return if (resize(ctx, memory, alignment, new_len, return_address)) memory.ptr else null;
+    }
+
+    fn free(
+        ctx: *anyopaque,
+        buf: []u8,
+        alignment: mem.Alignment,
+        return_address: usize,
+    ) void {
+        const self: *ReservedBumpAllocator = @ptrCast(@alignCast(ctx));
+        _ = alignment;
+        _ = return_address;
+        assert(@inComptime() or self.ownsSlice(buf));
+
+        if (self.isLastAllocation(buf)) {
+            self.end_index -= buf.len;
+        }
+    }
+};
+
+fn sliceContainsPtr(container: []const u8, ptr: [*]u8) bool {
+    return @intFromPtr(ptr) >= @intFromPtr(container.ptr) and
+        @intFromPtr(ptr) < (@intFromPtr(container.ptr) + container.len);
+}
+
+fn sliceContainsSlice(container: []const u8, slice: []const u8) bool {
+    return @intFromPtr(slice.ptr) >= @intFromPtr(container.ptr) and
+        (@intFromPtr(slice.ptr) + slice.len) <= (@intFromPtr(container.ptr) + container.len);
+}
+
+test "reserved bump allocator commits pages on demand" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    var allocator_impl = try ReservedBumpAllocator.init(64 * 1024);
+    defer allocator_impl.deinit();
+
+    const allocator = allocator_impl.allocator();
+    const page_size = std.heap.pageSize();
+
+    try std.testing.expectEqual(@as(usize, 0), allocator_impl.committedBytes());
+
+    const a = try allocator.alloc(u8, page_size / 2);
+    try std.testing.expectEqual(page_size, allocator_impl.committedBytes());
+
+    const b = try allocator.alloc(u8, page_size);
+    try std.testing.expect(allocator_impl.committedBytes() >= page_size * 2);
+
+    allocator.free(b);
+    allocator.free(a);
+}
+
+test "reserved bump allocator reuses last allocation space" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    var allocator_impl = try ReservedBumpAllocator.init(64 * 1024);
+    defer allocator_impl.deinit();
+
+    const allocator = allocator_impl.allocator();
+
+    const first = try allocator.alloc(u8, 16);
+    const second = try allocator.alloc(u8, 16);
+
+    allocator.free(second);
+    const third = try allocator.alloc(u8, 16);
+
+    try std.testing.expectEqual(@intFromPtr(second.ptr), @intFromPtr(third.ptr));
+    try std.testing.expectEqual(@intFromPtr(first.ptr) + 16, @intFromPtr(third.ptr));
+}

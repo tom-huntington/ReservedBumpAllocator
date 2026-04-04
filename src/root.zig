@@ -54,11 +54,25 @@ pub const ReservedBumpAllocator = struct {
         };
     }
 
+    pub fn initFixedBuffer(buffer: []u8) Error!ReservedBumpAllocator {
+        if (buffer.len == 0) return error.OutOfMemory;
+
+        return .{
+            .base = buffer.ptr,
+            .reserved_len = buffer.len,
+            .committed_len = buffer.len,
+            .end_index = 0,
+            .page_size = 0,
+        };
+    }
+
     pub fn deinit(self: *ReservedBumpAllocator) void {
-        switch (builtin.os.tag) {
-            .windows => windows.VirtualFree(self.base, 0, windows.MEM_RELEASE),
-            .linux, .macos => posix.munmap(@alignCast(self.base[0..self.reserved_len])),
-            else => unreachable,
+        if (self.page_size != 0) {
+            switch (builtin.os.tag) {
+                .windows => windows.VirtualFree(self.base, 0, windows.MEM_RELEASE),
+                .linux, .macos => posix.munmap(@alignCast(self.base[0..self.reserved_len])),
+                else => unreachable,
+            }
         }
         self.* = undefined;
     }
@@ -100,6 +114,8 @@ pub const ReservedBumpAllocator = struct {
     }
 
     fn ensureCommitted(self: *ReservedBumpAllocator, end_index: usize) Error!void {
+        if (self.page_size == 0 or self.committed_len == self.reserved_len) return;
+
         const needed = mem.alignForward(usize, end_index, self.page_size);
         if (needed <= self.committed_len) return;
         if (needed > self.reserved_len) return error.OutOfMemory;
@@ -248,4 +264,32 @@ test "reserved bump allocator reuses last allocation space" {
 
     try std.testing.expectEqual(@intFromPtr(second.ptr), @intFromPtr(third.ptr));
     try std.testing.expectEqual(@intFromPtr(first.ptr) + 16, @intFromPtr(third.ptr));
+}
+
+test "fixed buffer allocator starts fully committed" {
+    var buffer: [256]u8 = undefined;
+    var allocator_impl = try ReservedBumpAllocator.initFixedBuffer(&buffer);
+    defer allocator_impl.deinit();
+
+    try std.testing.expectEqual(buffer.len, allocator_impl.reservedBytes());
+    try std.testing.expectEqual(buffer.len, allocator_impl.committedBytes());
+    try std.testing.expect(allocator_impl.ownsPtr(buffer[0..].ptr));
+}
+
+test "fixed buffer allocator reuses last allocation space" {
+    var buffer: [64]u8 = undefined;
+    var allocator_impl = try ReservedBumpAllocator.initFixedBuffer(&buffer);
+    defer allocator_impl.deinit();
+
+    const allocator = allocator_impl.allocator();
+
+    const first = try allocator.alloc(u8, 16);
+    const second = try allocator.alloc(u8, 16);
+
+    allocator.free(second);
+    const third = try allocator.alloc(u8, 16);
+
+    try std.testing.expectEqual(@intFromPtr(second.ptr), @intFromPtr(third.ptr));
+    try std.testing.expectEqual(@intFromPtr(first.ptr) + 16, @intFromPtr(third.ptr));
+    try std.testing.expectEqual(buffer.len, allocator_impl.committedBytes());
 }

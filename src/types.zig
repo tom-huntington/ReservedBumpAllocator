@@ -32,7 +32,6 @@ pub const Token = struct {
     lexeme: []const u8,
 };
 
-pub const Arity = enum { value, monad, dyad };
 pub const Array = struct { data: []f64, shape: []u32, is_char: bool };
 pub const Scalar = struct { value: f64, is_char: bool };
 pub const Value = union(enum) {

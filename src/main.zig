@@ -7,6 +7,7 @@ const lex = @import("lex.zig");
 const eval = @import("eval.zig");
 const types = @import("types.zig");
 const format = @import("format.zig");
+const ReservedBufferAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
 
 fn bytesToArray(allocator: std.mem.Allocator, bytes: []const u8) !types.Array {
     const data = try allocator.alloc(f64, bytes.len);
@@ -42,6 +43,8 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const ast_alloc = arena.allocator();
+    var runtime_alloc = try ReservedBufferAllocator.init(1024 * 1024);
+    defer runtime_alloc.deinit();
 
     const wrap = struct {
         v: []const u8,
@@ -89,8 +92,8 @@ pub fn main() !void {
         .{ .array = input_array },
     };
     const result = switch (file_ast.main.arity) {
-        2 => return error.ArityMismatch, //try eval.evalFunc(ast_alloc, file_ast.main, args[0..2]),
-        1 => try eval.evalFunc(ast_alloc, file_ast.main, args[2..3]),
+        2 => return error.ArityMismatch, //try eval.evalFunc(&runtime_alloc, file_ast.main, args[0..2]),
+        1 => try eval.evalFunc(&runtime_alloc, file_ast.main, args[2..3]),
         else => return error.ArityMismatch,
     };
     //const rendered = try format.valueString(ast_alloc, result);

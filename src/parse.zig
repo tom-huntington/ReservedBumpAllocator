@@ -2,6 +2,7 @@ const std = @import("std");
 const builtins = @import("builtins.zig");
 const hofs = @import("hofs.zig");
 const types = @import("types.zig");
+const ReservedBufferAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
 const Token = types.Token;
 const Value = types.Value;
 const Expr = types.Expr;
@@ -26,7 +27,7 @@ pub const Symbol = struct {
 
 const HofSymbol = struct {
     arity: u32,
-    pointer: *const fn (std.mem.Allocator, []const Value, Expr.FuncExpr) Value,
+    pointer: *const fn (*ReservedBufferAllocator, []const Value, Expr.FuncExpr) Value,
 };
 
 const StatementKind = enum {
@@ -812,9 +813,9 @@ fn builtinFromParams(comptime params: anytype, comptime member: anytype) ?Builti
     };
 }
 
-fn makeBuiltinWrapper(comptime arity: u32, comptime member: anytype) *const fn (std.mem.Allocator, []const Value) Value {
+fn makeBuiltinWrapper(comptime arity: u32, comptime member: anytype) *const fn (*ReservedBufferAllocator, []const Value) Value {
     return &struct {
-        fn call(allocator: std.mem.Allocator, args: []const Value) Value {
+        fn call(allocator: *ReservedBufferAllocator, args: []const Value) Value {
             std.debug.assert(args.len == arity);
             const typed_args: *const [arity]Value = @ptrCast(args.ptr);
             return member(allocator, @constCast(typed_args));
@@ -842,9 +843,9 @@ fn hofFromParams(comptime params: anytype, comptime member: anytype) ?HofSymbol 
     };
 }
 
-fn makeHofWrapper(comptime arity: u32, comptime member: anytype) *const fn (std.mem.Allocator, []const Value, Expr.FuncExpr) Value {
+fn makeHofWrapper(comptime arity: u32, comptime member: anytype) *const fn (*ReservedBufferAllocator, []const Value, Expr.FuncExpr) Value {
     return &struct {
-        fn call(allocator: std.mem.Allocator, args: []const Value, fn_arg: Expr.FuncExpr) Value {
+        fn call(allocator: *ReservedBufferAllocator, args: []const Value, fn_arg: Expr.FuncExpr) Value {
             std.debug.assert(args.len == arity);
             const typed_args: *const [arity]Value = @ptrCast(args.ptr);
             return member(allocator, @constCast(typed_args), fn_arg);

@@ -1,9 +1,11 @@
 const std = @import("std");
 const types = @import("types.zig");
+const ReservedBufferAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
 const Expr = types.Expr;
 const Value = types.Value;
 
-pub fn add(all: std.mem.Allocator, args: *[2]Value) Value {
+pub fn add(all: *ReservedBufferAllocator, args: *[2]Value) Value {
+    const allocator = all.allocator();
     const a = args[0];
     const b = args[1];
     switch (a) {
@@ -23,8 +25,8 @@ pub fn add(all: std.mem.Allocator, args: *[2]Value) Value {
                         @panic("not implemented");
                     }
 
-                    const data = all.alloc(f64, aa.data.len) catch @panic("out of memory");
-                    const shape = all.dupe(u32, aa.shape) catch @panic("out of memory");
+                    const data = allocator.alloc(f64, aa.data.len) catch @panic("out of memory");
+                    const shape = allocator.dupe(u32, aa.shape) catch @panic("out of memory");
 
                     for (aa.data, ba.data, 0..) |lhs, rhs, i| {
                         data[i] = lhs + rhs;
@@ -38,14 +40,15 @@ pub fn add(all: std.mem.Allocator, args: *[2]Value) Value {
     }
     @panic("not implemented");
 }
-pub fn mul(all: std.mem.Allocator, args: *[2]Value) Value {
+pub fn mul(all: *ReservedBufferAllocator, args: *[2]Value) Value {
     const a = args[0];
     const b = args[1];
     _ = a;
     _ = all;
     return b;
 }
-pub fn sq(all: std.mem.Allocator, args: *[1]Value) Value {
+pub fn sq(all: *ReservedBufferAllocator, args: *[1]Value) Value {
+    const allocator = all.allocator();
     const a = args[0];
     switch (a) {
         .scalar => |scalar| {
@@ -53,8 +56,8 @@ pub fn sq(all: std.mem.Allocator, args: *[1]Value) Value {
             return .{ .scalar = .{ .value = val, .is_char = false } };
         },
         .array => |array| {
-            const data = all.alloc(f64, array.data.len) catch @panic("out of memory");
-            const shape = all.dupe(u32, array.shape) catch @panic("out of memory");
+            const data = allocator.alloc(f64, array.data.len) catch @panic("out of memory");
+            const shape = allocator.dupe(u32, array.shape) catch @panic("out of memory");
 
             for (array.data, 0..) |item, i| {
                 data[i] = item * item;
@@ -73,7 +76,8 @@ fn expectNonNegativeInteger(value: f64) usize {
     return @intFromFloat(value);
 }
 
-pub fn strided(all: std.mem.Allocator, args: *[3]Value) Value {
+pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
+    const allocator = all.allocator();
     const array = switch (args[0]) {
         .array => |array| array,
         else => @panic("strided expects array as first argument"),
@@ -99,8 +103,8 @@ pub fn strided(all: std.mem.Allocator, args: *[3]Value) Value {
         outer_size += 1;
     }
 
-    const data = all.alloc(f64, outer_size * inner_size) catch @panic("out of memory");
-    const shape = all.alloc(u32, 2) catch @panic("out of memory");
+    const data = allocator.alloc(f64, outer_size * inner_size) catch @panic("out of memory");
+    const shape = allocator.alloc(u32, 2) catch @panic("out of memory");
     shape[0] = @intCast(outer_size);
     shape[1] = @intCast(inner_size);
 
@@ -114,7 +118,8 @@ pub fn strided(all: std.mem.Allocator, args: *[3]Value) Value {
     return .{ .array = .{ .data = data, .shape = shape, .is_char = array.is_char } };
 }
 
-pub fn not_eq(all: std.mem.Allocator, args: *[2]Value) Value {
+pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
+    const allocator = all.allocator();
     const rhs = switch (args[1]) {
         .scalar => |scalar| scalar,
         else => @panic("not_eq expects args[1] to be scalar"),
@@ -128,8 +133,8 @@ pub fn not_eq(all: std.mem.Allocator, args: *[2]Value) Value {
             } };
         },
         .array => |lhs| {
-            const data = all.alloc(f64, lhs.data.len) catch @panic("out of memory");
-            const shape = all.dupe(u32, lhs.shape) catch @panic("out of memory");
+            const data = allocator.alloc(f64, lhs.data.len) catch @panic("out of memory");
+            const shape = allocator.dupe(u32, lhs.shape) catch @panic("out of memory");
 
             for (lhs.data, 0..) |item, i| {
                 data[i] = if (item != rhs.value) 1 else 0;
@@ -144,7 +149,7 @@ pub fn not_eq(all: std.mem.Allocator, args: *[2]Value) Value {
     }
 }
 
-pub fn first(all: std.mem.Allocator, args: *[1]Value) Value {
+pub fn first(all: *ReservedBufferAllocator, args: *[1]Value) Value {
     _ = all;
 
     const array = switch (args[0]) {

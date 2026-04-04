@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const ReservedBufferAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
 const Expr = types.Expr;
 const Value = types.Value;
 
@@ -13,7 +14,7 @@ pub fn isHofName(name: []const u8) bool {
     return false;
 }
 
-pub fn reduce(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Value {
+pub fn reduce(all: *ReservedBufferAllocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Value {
     const array = switch (args[0]) {
         .array => |array| array,
         else => @panic("reduce expects an array"),
@@ -39,7 +40,7 @@ pub fn reduce(all: std.mem.Allocator, args: *[1]Value, fn_arg: Expr.FuncExpr) Va
     return acc;
 }
 
-pub fn partition(all: std.mem.Allocator, args: *[2]Value, fn_arg: Expr.FuncExpr) Value {
+pub fn partition(all: *ReservedBufferAllocator, args: *[2]Value, fn_arg: Expr.FuncExpr) Value {
     const array = switch (args[0]) {
         .array => |arr| arr,
         else => @panic("partition expects an array"),

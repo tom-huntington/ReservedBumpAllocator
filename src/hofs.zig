@@ -93,7 +93,7 @@ pub fn partition(all: *ReservedBufferAllocator, result_dest: ?[]f64, args: *[2]V
         kept_count += 1;
     }
 
-    output.meta.shape_mut()[0] = kept_count;
+    output.meta.shape[0] = kept_count;
     return .{ .array = output };
 }
 

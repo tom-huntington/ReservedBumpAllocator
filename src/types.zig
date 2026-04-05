@@ -41,38 +41,34 @@ pub const CowStatus = enum {
 pub const MetadataHeader = struct {
     status: CowStatus,
     depth: u8,
+    shape: []usize,
 
-    pub fn init(
+    pub fn initWithDepth(
         allocator: *ReservedBufferAllocator,
         status: CowStatus,
         depth: usize,
     ) *MetadataHeader {
-        const total_bytes = MetadataHeader.prefix_bytes() + depth * @sizeOf(usize);
-        const bytes = allocator.allocator().alignedAlloc(u8, metadata_shape_alignment, total_bytes) catch @panic("out of memory");
+        const shape_offset = metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
+        const total_bytes = shape_offset + depth * @sizeOf(usize);
+        const bytes = allocator.allocator().alignedAlloc(u8, metadata_header_alignment, total_bytes) catch @panic("out of memory");
         const header: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+        const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         header.* = .{
             .status = status,
             .depth = std.math.cast(u8, depth) orelse @panic("too many dimensions"),
+            .shape = shape_ptr[0..depth],
         };
         return header;
     }
 
-    pub fn prefix_bytes() usize {
-        return metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
-    }
-
-    pub fn size_bytes(self: *const MetadataHeader) usize {
-        return prefix_bytes() + self.depth * @sizeOf(usize);
-    }
-
-    pub fn shape(self: *const MetadataHeader) []const usize {
-        const ptr: [*]const usize = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(self)) + prefix_bytes()));
-        return ptr[0..self.depth];
-    }
-
-    pub fn shape_mut(self: *MetadataHeader) []usize {
-        const ptr: [*]usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(self)) + prefix_bytes()));
-        return ptr[0..self.depth];
+    pub fn initWithShape(
+        allocator: *ReservedBufferAllocator,
+        status: CowStatus,
+        shape: []const usize, // copied into inline storage after the header
+    ) *MetadataHeader {
+        const header = initWithDepth(allocator, status, shape.len);
+        @memcpy(header.shape, shape);
+        return header;
     }
 };
 
@@ -81,9 +77,7 @@ pub fn InitMetadata(
     status: CowStatus,
     shape: []const usize,
 ) *MetadataHeader {
-    const header = MetadataHeader.init(allocator, status, shape.len);
-    @memcpy(header.shape_mut(), shape);
-    return header;
+    return MetadataHeader.initWithShape(allocator, status, shape);
 }
 
 const metadata_header_alignment = std.mem.Alignment.of(MetadataHeader);
@@ -95,7 +89,7 @@ pub const Array = struct {
     meta: *MetadataHeader,
 
     pub fn shape(self: Array) []const usize {
-        return self.meta.shape();
+        return self.meta.shape;
     }
 
     pub fn move(self: Array) Array {
@@ -116,8 +110,8 @@ pub const Array = struct {
         allocator: *ReservedBufferAllocator,
         dims: []const usize,
     ) Array {
-        var array = initWithDepth(allocator, dims.len, prod(dims));
-        @memcpy(array.meta.shape_mut(), dims);
+        const array = initWithDepth(allocator, dims.len, prod(dims));
+        @memcpy(array.meta.shape, dims);
         return array;
     }
 
@@ -126,15 +120,17 @@ pub const Array = struct {
         depth: usize,
         size: usize,
     ) Array {
-        const shape_offset = MetadataHeader.prefix_bytes();
+        const shape_offset = metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
         const data_offset = array_data_alignment.forward(shape_offset + depth * @sizeOf(usize));
         const total_bytes = data_offset + size * @sizeOf(f64);
         const bytes = allocator.allocator().alignedAlloc(u8, array_allocation_alignment, total_bytes) catch @panic("out of memory");
 
         const meta: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+        const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         meta.* = .{
             .status = CowStatus.Exclusive,
             .depth = std.math.cast(u8, depth) orelse @panic("too many dimensions"),
+            .shape = shape_ptr[0..depth],
         };
 
         const data_ptr: [*]f64 = @ptrCast(@alignCast(bytes.ptr + data_offset));

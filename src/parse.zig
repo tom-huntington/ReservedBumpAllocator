@@ -55,10 +55,11 @@ const ParseError = error{
     MainMustBeFunction,
     InvalidConst,
     InvalidCharacterLiteral,
-} || std.fmt.ParseFloatError || std.fmt.ParseIntError || std.mem.Allocator.Error;
+    OutOfMemory,
+} || std.fmt.ParseFloatError || std.fmt.ParseIntError;
 
 pub const Parser = struct {
-    allocator: std.mem.Allocator,
+    allocator: *ReservedBufferAllocator,
     value_allocator: *ReservedBufferAllocator,
     source: []const u8,
     tokens: []const Token,
@@ -68,14 +69,15 @@ pub const Parser = struct {
     local_params: std.ArrayList([]const u8),
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        allocator: *ReservedBufferAllocator,
         value_allocator: *ReservedBufferAllocator,
         source: []const u8,
         tokens: []const Token,
         line_offsets: []const u32,
     ) Parser {
-        const symbols = std.StringHashMap(Symbol).init(allocator);
-        const registered_hofs = std.StringHashMap(HofSymbol).init(allocator);
+        const alloc = allocator.allocator();
+        const symbols = std.StringHashMap(Symbol).init(alloc);
+        const registered_hofs = std.StringHashMap(HofSymbol).init(alloc);
         return .{
             .allocator = allocator,
             .value_allocator = value_allocator,
@@ -91,7 +93,7 @@ pub const Parser = struct {
     pub fn deinit(self: *Parser) void {
         self.symbols.deinit();
         self.hofs.deinit();
-        self.local_params.deinit(self.allocator);
+        self.local_params.deinit(self.allocator.allocator());
     }
 
     pub fn parseFile(self: *Parser) ParseError!FileAst {
@@ -99,10 +101,10 @@ pub const Parser = struct {
         try self.populateHofs();
 
         var consts: std.ArrayList(ConstDef) = .empty;
-        errdefer consts.deinit(self.allocator);
+        errdefer consts.deinit(self.allocator.allocator());
 
         var statements = try self.collectStatements(self.allocator);
-        defer statements.deinit(self.allocator);
+        defer statements.deinit(self.allocator.allocator());
 
         if (statements.items.len == 0) return error.MissingMain;
 
@@ -112,7 +114,7 @@ pub const Parser = struct {
         for (statements.items[0 .. statements.items.len - 1]) |stmt| {
             if (stmt.kind != .const_def) return error.InvalidConst;
             const const_def = try self.parseConst(stmt);
-            try consts.append(self.allocator, const_def);
+            try consts.append(self.allocator.allocator(), const_def);
         }
 
         var main_index = main_stmt.start;
@@ -122,7 +124,7 @@ pub const Parser = struct {
         if (main_expr.* != .func) return error.MainMustBeFunction;
 
         return .{
-            .consts = try consts.toOwnedSlice(self.allocator),
+            .consts = try consts.toOwnedSlice(self.allocator.allocator()),
             .main = &main_expr.func,
         };
     }
@@ -164,9 +166,9 @@ pub const Parser = struct {
         }
     }
 
-    fn collectStatements(self: *Parser, allocator: std.mem.Allocator) ParseError!std.ArrayList(Statement) {
+    fn collectStatements(self: *Parser, allocator: *ReservedBufferAllocator) ParseError!std.ArrayList(Statement) {
         var statements: std.ArrayList(Statement) = .empty;
-        errdefer statements.deinit(allocator);
+        errdefer statements.deinit(allocator.allocator());
 
         var pending_expr_start: ?usize = null;
 
@@ -179,7 +181,7 @@ pub const Parser = struct {
             switch (kind) {
                 .const_def => {
                     if (pending_expr_start) |_| return error.InvalidConst;
-                    try statements.append(allocator, .{
+                    try statements.append(allocator.allocator(), .{
                         .kind = .const_def,
                         .start = global_start,
                         .end = self.tokens.len,
@@ -188,7 +190,7 @@ pub const Parser = struct {
                 .expr => {
                     if (pending_expr_start == null) {
                         pending_expr_start = global_start;
-                        try statements.append(allocator, .{
+                        try statements.append(allocator.allocator(), .{
                             .kind = .expr,
                             .start = global_start,
                             .end = self.tokens.len,
@@ -275,11 +277,11 @@ pub const Parser = struct {
 
         const op = parseCombinator(tok) orelse return error.UnknownCombinator;
         var remaining_args: std.ArrayList(*Expr.FuncExpr) = .empty;
-        errdefer remaining_args.deinit(self.allocator);
+        errdefer remaining_args.deinit(self.allocator.allocator());
 
         const first_remaining = try self.parseExpr(index, end_index, infixInfo(.combinator).?.rbp, end_tag);
         if (first_remaining.* != .func) return error.ExpectedFunction;
-        try remaining_args.append(self.allocator, &first_remaining.func);
+        try remaining_args.append(self.allocator.allocator(), &first_remaining.func);
 
         while (true) {
             self.skipWhitespace(index, end_index);
@@ -294,10 +296,10 @@ pub const Parser = struct {
 
             const arg = try self.parseExpr(index, end_index, infixInfo(.combinator).?.rbp, end_tag);
             if (arg.* != .func) return error.ExpectedFunction;
-            try remaining_args.append(self.allocator, &arg.func);
+            try remaining_args.append(self.allocator.allocator(), &arg.func);
         }
 
-        return self.allocCombinatorExpr(op, &left.func, try remaining_args.toOwnedSlice(self.allocator));
+        return self.allocCombinatorExpr(op, &left.func, try remaining_args.toOwnedSlice(self.allocator.allocator()));
     }
 
     fn maybeParseImplicitApply(self: *Parser, index: *usize, end_index: usize, end_tag: ?TokenTag, left: *Expr) ParseError!*Expr {
@@ -474,9 +476,9 @@ pub const Parser = struct {
 
         const param_start = self.local_params.items.len;
         errdefer self.local_params.items.len = param_start;
-        try self.local_params.append(self.allocator, first_name);
+        try self.local_params.append(self.allocator.allocator(), first_name);
         if (second_name) |name| {
-            try self.local_params.append(self.allocator, name);
+            try self.local_params.append(self.allocator.allocator(), name);
         }
 
         index.* = lookahead;
@@ -508,7 +510,7 @@ pub const Parser = struct {
     ) ParseError!*Expr {
         var suffix_index = index.*;
         var values: std.ArrayList(Expr.ValueExpr) = .empty;
-        defer values.deinit(self.allocator);
+        defer values.deinit(self.allocator.allocator());
         var permutation_index: u32 = 0;
         var saw_suffix = false;
 
@@ -519,7 +521,7 @@ pub const Parser = struct {
             switch (self.tokens[suffix_index].tag) {
                 .comma => {
                     suffix_index += 1;
-                    try values.append(self.allocator, try self.parseIdentifierSuffixValue(&suffix_index, end_index));
+                    try values.append(self.allocator.allocator(), try self.parseIdentifierSuffixValue(&suffix_index, end_index));
                     saw_suffix = true;
                 },
                 .caret => {
@@ -535,7 +537,7 @@ pub const Parser = struct {
         if (expr.* != .func) return error.ExpectedFunction;
 
         index.* = suffix_index;
-        const arguments = try values.toOwnedSlice(self.allocator);
+        const arguments = try values.toOwnedSlice(self.allocator.allocator());
         const arity = if (expr.func.arity > arguments.len) expr.func.arity - @as(u32, @intCast(arguments.len)) else expr.func.arity;
         return self.allocExpr(.{
             .func = .{ .arity = arity, .type = .{ .partial_apply_permute = .{
@@ -621,9 +623,9 @@ pub const Parser = struct {
 
     fn parseLiteralValue(self: *Parser, first_tok: Token, index: *usize, end_index: usize) ParseError!Value {
         var items: std.ArrayList(Value) = .empty;
-        defer items.deinit(self.allocator);
+        defer items.deinit(self.allocator.allocator());
 
-        try items.append(self.allocator, try self.parseLiteralAtomValue(first_tok, index, end_index));
+        try items.append(self.allocator.allocator(), try self.parseLiteralAtomValue(first_tok, index, end_index));
 
         while (true) {
             var lookahead = index.*;
@@ -637,7 +639,7 @@ pub const Parser = struct {
 
             const next_tok = self.tokens[lookahead];
             lookahead += 1;
-            try items.append(self.allocator, try self.parseLiteralAtomValue(next_tok, &lookahead, end_index));
+            try items.append(self.allocator.allocator(), try self.parseLiteralAtomValue(next_tok, &lookahead, end_index));
             index.* = lookahead;
         }
 
@@ -657,7 +659,7 @@ pub const Parser = struct {
 
     fn parseBracketLiteralValue(self: *Parser, index: *usize, end_index: usize) ParseError!Value {
         var rows: std.ArrayList(Value) = .empty;
-        defer rows.deinit(self.allocator);
+        defer rows.deinit(self.allocator.allocator());
 
         while (true) {
             self.skipWhitespace(index, end_index);
@@ -671,7 +673,7 @@ pub const Parser = struct {
             if (!tokenStartsLiteral(row_tok.tag) or row_tok.tag == .lbracket) return error.UnexpectedToken;
 
             index.* += 1;
-            try rows.append(self.allocator, try self.parseLiteralValue(row_tok, index, end_index));
+            try rows.append(self.allocator.allocator(), try self.parseLiteralValue(row_tok, index, end_index));
         }
 
         if (rows.items.len == 0) {
@@ -781,7 +783,7 @@ pub const Parser = struct {
     }
 
     fn allocExpr(self: *Parser, expr: Expr) ParseError!*Expr {
-        const ptr = try self.allocator.create(Expr);
+        const ptr = try self.allocator.allocator().create(Expr);
         ptr.* = expr;
         return ptr;
     }

@@ -15,15 +15,12 @@ pub const EvalError = error{
 
 const EvalContext = struct {
     allocator: *ReservedBufferAllocator,
-    mem: std.mem.Allocator,
     bindings: std.StringHashMap(Value),
 
     fn init(allocator: *ReservedBufferAllocator) EvalContext {
-        const mem = allocator.allocator();
         return .{
             .allocator = allocator,
-            .mem = mem,
-            .bindings = std.StringHashMap(Value).init(mem),
+            .bindings = std.StringHashMap(Value).init(allocator.allocator()),
         };
     }
 
@@ -73,7 +70,7 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
             return hof.pointer(ctx.allocator, args, hof.funcArg.*);
         },
         .partial_apply_permute => |partial| {
-            const right = ctx.mem.alloc(Value, partial.arguments.len) catch @panic("out of memory");
+            const right = ctx.allocator.allocator().alloc(Value, partial.arguments.len) catch @panic("out of memory");
             for (partial.arguments, 0..) |*expr, i| {
                 right[i] = try evalValueExpr(ctx, expr);
             }
@@ -187,12 +184,12 @@ fn evalArgs(ctx: *EvalContext, expr: *const Expr) EvalError![]const Value {
         .func => return error.UnsupportedValueKind,
         .value => |value_expr| switch (value_expr) {
             .literal, .ident, .apply => blk: {
-                const args = ctx.mem.alloc(Value, 1) catch @panic("out of memory");
+                const args = ctx.allocator.allocator().alloc(Value, 1) catch @panic("out of memory");
                 args[0] = try evalExpr(ctx, expr);
                 break :blk args;
             },
             .strand => |strand| blk: {
-                const args = ctx.mem.alloc(Value, 2) catch @panic("out of memory");
+                const args = ctx.allocator.allocator().alloc(Value, 2) catch @panic("out of memory");
                 args[0] = try evalExpr(ctx, strand.left);
                 args[1] = try evalExpr(ctx, strand.right);
                 break :blk args;
@@ -208,30 +205,30 @@ fn applyRightArgs(
     right: []const Value,
     permutation_index: u32,
 ) EvalError!Value {
-    const combined = ctx.mem.alloc(Value, args.len + right.len) catch @panic("out of memory");
+    const combined = ctx.allocator.allocator().alloc(Value, args.len + right.len) catch @panic("out of memory");
     @memcpy(combined[0..args.len], args);
     @memcpy(combined[args.len..], right);
     if (permutation_index == 0 or combined.len <= 1) {
         return evalFuncInContext(ctx, func, combined);
     }
 
-    const order = try nthPermutation(ctx.mem, combined.len, permutation_index);
-    const permuted = ctx.mem.alloc(Value, combined.len) catch @panic("out of memory");
+    const order = try nthPermutation(ctx.allocator, combined.len, permutation_index);
+    const permuted = ctx.allocator.allocator().alloc(Value, combined.len) catch @panic("out of memory");
     for (order, 0..) |source_index, i| {
         permuted[i] = combined[source_index];
     }
     return evalFuncInContext(ctx, func, permuted);
 }
 
-fn nthPermutation(allocator: std.mem.Allocator, len: usize, permutation_index: u32) EvalError![]usize {
+fn nthPermutation(allocator: *ReservedBufferAllocator, len: usize, permutation_index: u32) EvalError![]usize {
     var max_index: u64 = 1;
     for (2..len + 1) |n| {
         max_index *= n;
     }
     if (permutation_index >= max_index) return error.ArityMismatch;
 
-    const indices = allocator.alloc(usize, len) catch @panic("out of memory");
-    const order = allocator.alloc(usize, len) catch @panic("out of memory");
+    const indices = allocator.allocator().alloc(usize, len) catch @panic("out of memory");
+    const order = allocator.allocator().alloc(usize, len) catch @panic("out of memory");
     for (0..len) |i| {
         indices[i] = i;
     }
@@ -268,7 +265,7 @@ fn factorial(n: usize) u64 {
 
 fn evalStrand(ctx: *EvalContext, left: *const Expr, right: *const Expr) EvalError!Value {
     var items: std.ArrayList(Value) = .empty;
-    defer items.deinit(ctx.mem);
+    defer items.deinit(ctx.allocator.allocator());
 
     try appendStrandItems(ctx, &items, left);
     try appendStrandItems(ctx, &items, right);
@@ -283,7 +280,7 @@ fn appendStrandItems(ctx: *EvalContext, items: *std.ArrayList(Value), expr: *con
                 try appendStrandItems(ctx, items, strand.left);
                 try appendStrandItems(ctx, items, strand.right);
             },
-            else => items.append(ctx.mem, try evalValueExpr(ctx, &value_expr)) catch @panic("out of memory"),
+            else => items.append(ctx.allocator.allocator(), try evalValueExpr(ctx, &value_expr)) catch @panic("out of memory"),
         },
     }
 }

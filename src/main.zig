@@ -32,12 +32,8 @@ pub fn main() !void {
         _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
     }
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const ast_alloc = arena.allocator();
+    var ast_alloc = try ReservedBufferAllocator.init(1024 * 1024);
+    defer ast_alloc.deinit();
     var runtime_alloc = try ReservedBufferAllocator.init(1024 * 1024);
     defer runtime_alloc.deinit();
 
@@ -67,13 +63,13 @@ pub fn main() !void {
     ;
     std.debug.print("soure: {s}\n", .{source});
 
-    var lexed = try lex.lex(allocator, source);
+    var lexed = try lex.lex(&ast_alloc, source);
     stringprint.printfmt("tokens: {}\n", .{lexed.tokens});
     stringprint.printfmt("line_offsets: {}\n", .{lexed.line_offsets});
 
-    defer lexed.deinit(allocator);
+    defer lexed.deinit(&ast_alloc);
 
-    var parser = parse.Parser.init(ast_alloc, &runtime_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
+    var parser = parse.Parser.init(&ast_alloc, &runtime_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
     const file_ast: parse.FileAst = try parser.parseFile();
     stringprint.printfmt("main: {}\n", .{file_ast.main});
@@ -91,7 +87,7 @@ pub fn main() !void {
         1 => try eval.evalFunc(&runtime_alloc, file_ast.main, args[2..3]),
         else => return error.ArityMismatch,
     };
-    const rendered = try format.valueString(ast_alloc, result, true);
+    const rendered = try format.valueString(ast_alloc.allocator(), result, true);
     std.debug.print("{s}\n", .{rendered});
     // std.debug.print("{}\n", .{result});
 }

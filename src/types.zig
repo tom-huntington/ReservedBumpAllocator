@@ -40,7 +40,6 @@ pub const CowStatus = enum {
 };
 pub const MetadataHeader = struct {
     status: CowStatus,
-    depth: u8,
     shape: []usize,
 
     pub fn initWithDepth(
@@ -55,7 +54,6 @@ pub const MetadataHeader = struct {
         const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         header.* = .{
             .status = status,
-            .depth = std.math.cast(u8, depth) orelse @panic("too many dimensions"),
             .shape = shape_ptr[0..depth],
         };
         return header;
@@ -129,7 +127,6 @@ pub const Array = struct {
         const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         meta.* = .{
             .status = CowStatus.Exclusive,
-            .depth = std.math.cast(u8, depth) orelse @panic("too many dimensions"),
             .shape = shape_ptr[0..depth],
         };
 

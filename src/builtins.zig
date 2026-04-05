@@ -20,18 +20,18 @@ pub fn add(all: *ReservedBufferAllocator, args: *[2]Value) Value {
         .array => |aa| {
             switch (b) {
                 .array => |ba| {
-                    if (!std.mem.eql(u32, aa.shape, ba.shape)) {
+                    if (!std.mem.eql(usize, aa.shape(), ba.shape())) {
                         @panic("not implemented");
                     }
 
                     const data = allocator.alloc(f64, aa.data.len) catch @panic("out of memory");
-                    const shape = allocator.dupe(u32, aa.shape) catch @panic("out of memory");
+                    const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, aa.shape()) catch @panic("out of memory");
 
                     for (aa.data, ba.data, 0..) |lhs, rhs, i| {
                         data[i] = lhs + rhs;
                     }
 
-                    return .{ .array = .{ .data = data, .shape = shape } };
+                    return .{ .array = .{ .data = data, .meta = meta } };
                 },
                 .scalar => {},
             }
@@ -55,13 +55,13 @@ pub fn sq(all: *ReservedBufferAllocator, args: *[1]Value) Value {
         },
         .array => |array| {
             const data = allocator.alloc(f64, array.data.len) catch @panic("out of memory");
-            const shape = allocator.dupe(u32, array.shape) catch @panic("out of memory");
+            const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, array.shape()) catch @panic("out of memory");
 
             for (array.data, 0..) |item, i| {
                 data[i] = item * item;
             }
 
-            return .{ .array = .{ .data = data, .shape = shape } };
+            return .{ .array = .{ .data = data, .meta = meta } };
         },
     }
     @panic("not implemented");
@@ -89,7 +89,7 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         else => @panic("strided expects scalar stride"),
     };
 
-    if (array.shape.len != 1) @panic("strided only supports rank-1 arrays");
+    if (array.shape().len != 1) @panic("strided only supports rank-1 arrays");
     if (inner_size == 0) @panic("strided inner size must be greater than zero");
 
     const step = inner_size + stride - 1;
@@ -102,9 +102,7 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
     }
 
     const data = allocator.alloc(f64, outer_size * inner_size) catch @panic("out of memory");
-    const shape = allocator.alloc(u32, 2) catch @panic("out of memory");
-    shape[0] = @intCast(outer_size);
-    shape[1] = @intCast(inner_size);
+    const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, &.{ outer_size, inner_size }) catch @panic("out of memory");
 
     start = 0;
     var out_index: usize = 0;
@@ -113,7 +111,7 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         out_index += inner_size;
     }
 
-    return .{ .array = .{ .data = data, .shape = shape } };
+    return .{ .array = .{ .data = data, .meta = meta } };
 }
 
 pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
@@ -129,7 +127,7 @@ pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
         },
         .array => |lhs| {
             const data = allocator.alloc(f64, lhs.data.len) catch @panic("out of memory");
-            const shape = allocator.dupe(u32, lhs.shape) catch @panic("out of memory");
+            const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, lhs.shape()) catch @panic("out of memory");
 
             for (lhs.data, 0..) |item, i| {
                 data[i] = if (item != rhs) 1 else 0;
@@ -137,7 +135,7 @@ pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
 
             return .{ .array = .{
                 .data = data,
-                .shape = shape,
+                .meta = meta,
             } };
         },
     }
@@ -151,7 +149,7 @@ pub fn first(all: *ReservedBufferAllocator, args: *[1]Value) Value {
         else => @panic("first expects an array"),
     };
 
-    if (array.shape.len != 1) @panic("first only supports rank-1 arrays");
+    if (array.shape().len != 1) @panic("first only supports rank-1 arrays");
     if (array.data.len == 0) @panic("first requires a non-empty array");
 
     return .{ .scalar = array.data[0] };

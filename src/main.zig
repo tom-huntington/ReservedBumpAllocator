@@ -13,17 +13,15 @@ fn bytesToArray(allocator: std.mem.Allocator, bytes: []const u8) !types.Array {
     const data = try allocator.alloc(f64, bytes.len);
     errdefer allocator.free(data);
 
-    const shape = try allocator.alloc(u32, 1);
-    errdefer allocator.free(shape);
+    const meta = try types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, &.{bytes.len});
 
-    shape[0] = @intCast(bytes.len);
     for (bytes, 0..) |byte, i| {
         data[i] = @floatFromInt(byte);
     }
 
     return .{
         .data = data,
-        .shape = shape,
+        .meta = meta,
     };
 }
 
@@ -84,10 +82,10 @@ pub fn main() !void {
 
     var arg0_data = [_]f64{ 1, 2 };
     var arg1_data = [_]f64{ 4, 5 };
-    var arg_shape = [_]u32{8};
+    const arg_meta = try types.allocMetadataHeaderWithAllocator(ast_alloc, .Exclusive, &.{8});
     const args = [_]types.Value{
-        .{ .array = .{ .data = arg0_data[0..], .shape = arg_shape[0..] } },
-        .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..] } },
+        .{ .array = .{ .data = arg0_data[0..], .meta = arg_meta } },
+        .{ .array = .{ .data = arg1_data[0..], .meta = arg_meta } },
         .{ .array = input_array },
     };
     const result = switch (file_ast.main.arity) {

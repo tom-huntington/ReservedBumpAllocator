@@ -43,14 +43,14 @@ fn fmtValue(allocator: Allocator, value: Value, is_char: bool, params: GridFmtPa
             }
             return gridFromOwnedRow(allocator, try formatNumber(allocator, scalar));
         },
-        .array => |array| try fmtArrayValue(allocator, array.data, array.shape, is_char, params),
+        .array => |array| try fmtArrayValue(allocator, array.data, array.shape(), is_char, params),
     };
 }
 
 fn fmtArrayValue(
     allocator: Allocator,
     data: []const f64,
-    shape: []const u32,
+    shape: []const usize,
     is_char: bool,
     params: GridFmtParams,
 ) anyerror!Grid {
@@ -80,7 +80,7 @@ fn fmtArrayValue(
 fn fmtArray(
     allocator: Allocator,
     data: []const f64,
-    shape: []const u32,
+    shape: []const usize,
     is_char: bool,
     params: GridFmtParams,
     metagrid: *MetaGrid,
@@ -256,11 +256,11 @@ fn outlineGrid(allocator: Allocator, grid: *Grid, rank: usize, is_char: bool) !v
     try grid.append(bottom);
 }
 
-fn requiresSummary(shape: []const u32, elem_count: usize) bool {
+fn requiresSummary(shape: []const usize, elem_count: usize) bool {
     return elem_count > 3600 or shape.len > 8;
 }
 
-fn summaryRow(allocator: Allocator, data: []const f64, shape: []const u32, is_char: bool) ![]u8 {
+fn summaryRow(allocator: Allocator, data: []const f64, shape: []const usize, is_char: bool) ![]u8 {
     var out = Row.init(allocator);
     errdefer out.deinit();
     try appendShape(&out, shape, is_char);
@@ -291,7 +291,7 @@ fn summaryRow(allocator: Allocator, data: []const f64, shape: []const u32, is_ch
     return out.toOwnedSlice();
 }
 
-fn appendShape(out: *Row, shape: []const u32, is_char: bool) !void {
+fn appendShape(out: *Row, shape: []const usize, is_char: bool) !void {
     for (shape, 0..) |dim, i| {
         if (i > 0) try out.appendSlice("x");
         try out.writer().print("{}", .{dim});

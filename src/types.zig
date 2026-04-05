@@ -32,7 +32,80 @@ pub const Token = struct {
     lexeme: []const u8,
 };
 
-pub const Array = struct { data: []f64, shape: []u32 };
+const metadata_shape_alignment = std.mem.Alignment.of(usize);
+
+pub const CowStatus = enum {
+    Exclusive,
+    Shared,
+};
+pub const MetadataHeader = struct {
+    status: CowStatus,
+    depth: u8,
+
+    pub fn prefix_bytes() usize {
+        return metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
+    }
+
+    pub fn size_bytes(self: *const MetadataHeader) usize {
+        return prefix_bytes() + self.depth * @sizeOf(usize);
+    }
+
+    pub fn shape(self: *const MetadataHeader) []const usize {
+        const ptr: [*]const usize = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(self)) + prefix_bytes()));
+        return ptr[0..self.depth];
+    }
+
+    pub fn shape_mut(self: *MetadataHeader) []usize {
+        const ptr: [*]usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(self)) + prefix_bytes()));
+        return ptr[0..self.depth];
+    }
+};
+pub const Array = struct {
+    data: []f64,
+    meta: *MetadataHeader,
+
+    pub fn shape(self: Array) []const usize {
+        return self.meta.shape();
+    }
+
+    pub fn move(self: Array) Array {
+        std.debug.assert(self.meta.status == CowStatus.Exclusive);
+        return self;
+    }
+    pub fn manually_counted_move(self: Array) Array {
+        // up to programming to ensure there are no outstanding references
+        self.meta.status = CowStatus.Exclusive;
+        return self;
+    }
+    pub fn copy(self: Array) Array {
+        self.meta.status = CowStatus.Shared;
+        return self;
+    }
+};
+
+pub fn allocMetadataHeaderWithAllocator(
+    allocator: std.mem.Allocator,
+    status: CowStatus,
+    shape: []const usize,
+) !*MetadataHeader {
+    const total_bytes = MetadataHeader.prefix_bytes() + shape.len * @sizeOf(usize);
+    const bytes = try allocator.alignedAlloc(u8, metadata_shape_alignment, total_bytes);
+    const header: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+    header.* = .{
+        .status = status,
+        .depth = std.math.cast(u8, shape.len) orelse return error.OutOfMemory,
+    };
+    @memcpy(header.shape_mut(), shape);
+    return header;
+}
+
+pub fn allocMetadataHeader(
+    allocator: *ReservedBufferAllocator,
+    status: CowStatus,
+    shape: []const usize,
+) !*MetadataHeader {
+    return allocMetadataHeaderWithAllocator(allocator.allocator(), status, shape);
+}
 pub const Value = union(enum) {
     scalar: f64,
     array: Array,

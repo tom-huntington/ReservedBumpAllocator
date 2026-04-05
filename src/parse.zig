@@ -668,10 +668,8 @@ pub const Parser = struct {
 
         if (rows.items.len == 0) {
             const data = try self.allocator.alloc(f64, 0);
-            const shape = try self.allocator.alloc(u32, 2);
-            shape[0] = 0;
-            shape[1] = 0;
-            return .{ .array = .{ .data = data, .shape = shape } };
+            const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, &.{ 0, 0 });
+            return .{ .array = .{ .data = data, .meta = meta } };
         }
 
         return try self.materializeLiteralArray(rows.items);
@@ -681,8 +679,8 @@ pub const Parser = struct {
         if (items.len == 0) return error.ExpectedValue;
 
         const first_shape = switch (items[0]) {
-            .scalar => &[_]u32{},
-            .array => |array| array.shape,
+            .scalar => &[_]usize{},
+            .array => |array| array.shape(),
         };
         const elem_len = switch (items[0]) {
             .scalar => @as(usize, 1),
@@ -695,16 +693,17 @@ pub const Parser = struct {
                     if (first_shape.len != 0) return error.UnexpectedToken;
                 },
                 .array => |array| {
-                    if (!std.mem.eql(u32, first_shape, array.shape)) return error.UnexpectedToken;
+                    if (!std.mem.eql(usize, first_shape, array.shape())) return error.UnexpectedToken;
                     if (array.data.len != elem_len) return error.UnexpectedToken;
                 },
             }
         }
 
         const data = try self.allocator.alloc(f64, items.len * elem_len);
-        const shape = try self.allocator.alloc(u32, first_shape.len + 1);
-        shape[0] = @intCast(items.len);
+        const shape = try self.allocator.alloc(usize, first_shape.len + 1);
+        shape[0] = items.len;
         @memcpy(shape[1..], first_shape);
+        const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, shape);
 
         var data_index: usize = 0;
         for (items) |item| {
@@ -720,18 +719,17 @@ pub const Parser = struct {
             }
         }
 
-        return .{ .array = .{ .data = data, .shape = shape } };
+        return .{ .array = .{ .data = data, .meta = meta } };
     }
 
     fn parseRawStringValue(self: *Parser, lexeme: []const u8) ParseError!Value {
         const bytes = if (lexeme.len > 0) lexeme[1..] else lexeme;
         const data = try self.allocator.alloc(f64, bytes.len);
-        const shape = try self.allocator.alloc(u32, 1);
-        shape[0] = @intCast(bytes.len);
+        const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, &.{bytes.len});
         for (bytes, 0..) |byte, i| {
             data[i] = @floatFromInt(byte);
         }
-        return .{ .array = .{ .data = data, .shape = shape } };
+        return .{ .array = .{ .data = data, .meta = meta } };
     }
 
     fn buildInfix(self: *Parser, tok: Token, left: *Expr, right: *Expr) ParseError!*Expr {

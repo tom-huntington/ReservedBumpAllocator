@@ -20,7 +20,7 @@ pub fn reduce(all: *ReservedBufferAllocator, args: *[1]Value, fn_arg: Expr.FuncE
         else => @panic("reduce expects an array"),
     };
 
-    if (array.shape.len != 1) @panic("reduce only supports rank-1 arrays");
+    if (array.shape().len != 1) @panic("reduce only supports rank-1 arrays");
     if (array.data.len == 0) @panic("reduce requires a non-empty array");
 
     var acc: Value = .{
@@ -47,8 +47,8 @@ pub fn partition(all: *ReservedBufferAllocator, args: *[2]Value, fn_arg: Expr.Fu
         else => @panic("partition expects an array"),
     };
 
-    if (array.shape.len != 1) @panic("not implemented");
-    if (!std.mem.eql(u32, array.shape, mask.shape)) @panic("not implemented");
+    if (array.shape().len != 1) @panic("not implemented");
+    if (!std.mem.eql(usize, array.shape(), mask.shape())) @panic("not implemented");
 
     _ = all;
     _ = fn_arg;

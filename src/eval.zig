@@ -85,13 +85,14 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
 
 fn evalTableFunc(allocator: std.mem.Allocator, table: anytype, args: []const Value) EvalError!Value {
     if (args.len != 1) return error.ArityMismatch;
-    if (table.lookup.shape.len != 2 or table.lookup.shape[1] != 2) return error.NotImplemented;
+    const lookup_shape = table.lookup.shape();
+    if (lookup_shape.len != 2 or lookup_shape[1] != 2) return error.NotImplemented;
 
     return switch (args[0]) {
         .scalar => |scalar| .{ .scalar = try evalTableScalar(table, scalar) },
         .array => |array| blk: {
             const data = allocator.alloc(f64, array.data.len) catch @panic("out of memory");
-            const shape = allocator.dupe(u32, array.shape) catch @panic("out of memory");
+            const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, array.shape()) catch @panic("out of memory");
 
             for (array.data, 0..) |item, i| {
                 data[i] = try evalTableScalar(table, item);
@@ -99,14 +100,14 @@ fn evalTableFunc(allocator: std.mem.Allocator, table: anytype, args: []const Val
 
             break :blk .{ .array = .{
                 .data = data,
-                .shape = shape,
+                .meta = meta,
             } };
         },
     };
 }
 
 fn evalTableScalar(table: anytype, key: f64) EvalError!f64 {
-    const row_count: usize = table.lookup.shape[0];
+    const row_count = table.lookup.shape()[0];
     for (0..row_count) |row| {
         const row_offset = row * 2;
         const candidate = table.lookup.data[row_offset];
@@ -291,8 +292,8 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
     if (items.len == 0) return error.UnsupportedValueKind;
 
     const first_shape = switch (items[0]) {
-        .scalar => &[_]u32{},
-        .array => |array| array.shape,
+        .scalar => &[_]usize{},
+        .array => |array| array.shape(),
     };
     const elem_len = switch (items[0]) {
         .scalar => @as(usize, 1),
@@ -305,16 +306,17 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
                 if (first_shape.len != 0) return error.UnsupportedValueKind;
             },
             .array => |array| {
-                if (!std.mem.eql(u32, first_shape, array.shape)) return error.UnsupportedValueKind;
+                if (!std.mem.eql(usize, first_shape, array.shape())) return error.UnsupportedValueKind;
                 if (array.data.len != elem_len) return error.UnsupportedValueKind;
             },
         }
     }
 
     const data = allocator.alloc(f64, items.len * elem_len) catch @panic("out of memory");
-    const shape = allocator.alloc(u32, first_shape.len + 1) catch @panic("out of memory");
-    shape[0] = @intCast(items.len);
+    const shape = allocator.alloc(usize, first_shape.len + 1) catch @panic("out of memory");
+    shape[0] = items.len;
     @memcpy(shape[1..], first_shape);
+    const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, shape) catch @panic("out of memory");
 
     var data_index: usize = 0;
     for (items) |item| {
@@ -330,5 +332,5 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
         }
     }
 
-    return .{ .array = .{ .data = data, .shape = shape } };
+    return .{ .array = .{ .data = data, .meta = meta } };
 }

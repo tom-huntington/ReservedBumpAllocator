@@ -9,11 +9,9 @@ const types = @import("types.zig");
 const format = @import("format.zig");
 const ReservedBufferAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
 
-fn bytesToArray(allocator: std.mem.Allocator, bytes: []const u8) !types.Array {
-    const data = try allocator.alloc(f64, bytes.len);
-    errdefer allocator.free(data);
-
-    const meta = try types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, &.{bytes.len});
+fn bytesToArray(allocator: *ReservedBufferAllocator, bytes: []const u8) !types.Array {
+    const data = try allocator.allocator().alloc(f64, bytes.len);
+    const meta = types.allocMetadataHeader(allocator, .Exclusive, &.{bytes.len});
 
     for (bytes, 0..) |byte, i| {
         data[i] = @floatFromInt(byte);
@@ -60,7 +58,7 @@ pub fn main() !void {
         \\R14
         \\L82
     ;
-    const input_array = try bytesToArray(ast_alloc, input);
+    const input_array = try bytesToArray(&runtime_alloc, input);
     std.debug.print("input_array: {}\n", .{input_array});
 
     //std.debug.print("{f}", .{std.zig.fmtString(input)});
@@ -75,14 +73,14 @@ pub fn main() !void {
 
     defer lexed.deinit(allocator);
 
-    var parser = parse.Parser.init(ast_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
+    var parser = parse.Parser.init(ast_alloc, &runtime_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
     defer parser.deinit();
-    const file_ast: parse.FileAst = try parser.parseFile(ast_alloc);
+    const file_ast: parse.FileAst = try parser.parseFile();
     stringprint.printfmt("main: {}\n", .{file_ast.main});
 
     var arg0_data = [_]f64{ 1, 2 };
     var arg1_data = [_]f64{ 4, 5 };
-    const arg_meta = try types.allocMetadataHeaderWithAllocator(ast_alloc, .Exclusive, &.{8});
+    const arg_meta = types.allocMetadataHeader(&runtime_alloc, .Exclusive, &.{8});
     const args = [_]types.Value{
         .{ .array = .{ .data = arg0_data[0..], .meta = arg_meta } },
         .{ .array = .{ .data = arg1_data[0..], .meta = arg_meta } },

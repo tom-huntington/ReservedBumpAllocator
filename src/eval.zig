@@ -79,11 +79,11 @@ fn evalFuncInContext(ctx: *EvalContext, func: *const Expr.FuncExpr, args: []cons
             }
             return applyRightArgs(ctx, partial.func, args, right, partial.permutation_index);
         },
-        .table => |table| return evalTableFunc(ctx.mem, table, args),
+        .table => |table| return evalTableFunc(ctx.allocator, table, args),
     }
 }
 
-fn evalTableFunc(allocator: std.mem.Allocator, table: anytype, args: []const Value) EvalError!Value {
+fn evalTableFunc(allocator: *ReservedBufferAllocator, table: anytype, args: []const Value) EvalError!Value {
     if (args.len != 1) return error.ArityMismatch;
     const lookup_shape = table.lookup.shape();
     if (lookup_shape.len != 2 or lookup_shape[1] != 2) return error.NotImplemented;
@@ -91,8 +91,8 @@ fn evalTableFunc(allocator: std.mem.Allocator, table: anytype, args: []const Val
     return switch (args[0]) {
         .scalar => |scalar| .{ .scalar = try evalTableScalar(table, scalar) },
         .array => |array| blk: {
-            const data = allocator.alloc(f64, array.data.len) catch @panic("out of memory");
-            const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, array.shape()) catch @panic("out of memory");
+            const data = allocator.allocator().alloc(f64, array.data.len) catch @panic("out of memory");
+            const meta = types.allocMetadataHeader(allocator, .Exclusive, array.shape());
 
             for (array.data, 0..) |item, i| {
                 data[i] = try evalTableScalar(table, item);
@@ -272,7 +272,7 @@ fn evalStrand(ctx: *EvalContext, left: *const Expr, right: *const Expr) EvalErro
 
     try appendStrandItems(ctx, &items, left);
     try appendStrandItems(ctx, &items, right);
-    return materializeArrayStrand(ctx.mem, items.items);
+    return materializeArrayStrand(ctx.allocator, items.items);
 }
 
 fn appendStrandItems(ctx: *EvalContext, items: *std.ArrayList(Value), expr: *const Expr) EvalError!void {
@@ -288,7 +288,7 @@ fn appendStrandItems(ctx: *EvalContext, items: *std.ArrayList(Value), expr: *con
     }
 }
 
-fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) EvalError!Value {
+fn materializeArrayStrand(allocator: *ReservedBufferAllocator, items: []const Value) EvalError!Value {
     if (items.len == 0) return error.UnsupportedValueKind;
 
     const first_shape = switch (items[0]) {
@@ -312,11 +312,11 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
         }
     }
 
-    const data = allocator.alloc(f64, items.len * elem_len) catch @panic("out of memory");
-    const shape = allocator.alloc(usize, first_shape.len + 1) catch @panic("out of memory");
+    const data = allocator.allocator().alloc(f64, items.len * elem_len) catch @panic("out of memory");
+    const shape = allocator.allocator().alloc(usize, first_shape.len + 1) catch @panic("out of memory");
     shape[0] = items.len;
     @memcpy(shape[1..], first_shape);
-    const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, shape) catch @panic("out of memory");
+    const meta = types.allocMetadataHeader(allocator, .Exclusive, shape);
 
     var data_index: usize = 0;
     for (items) |item| {

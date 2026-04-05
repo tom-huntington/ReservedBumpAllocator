@@ -59,6 +59,7 @@ const ParseError = error{
 
 pub const Parser = struct {
     allocator: std.mem.Allocator,
+    value_allocator: *ReservedBufferAllocator,
     source: []const u8,
     tokens: []const Token,
     line_offsets: []const u32,
@@ -66,11 +67,18 @@ pub const Parser = struct {
     hofs: std.StringHashMap(HofSymbol),
     local_params: std.ArrayList([]const u8),
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: []const Token, line_offsets: []const u32) Parser {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        value_allocator: *ReservedBufferAllocator,
+        source: []const u8,
+        tokens: []const Token,
+        line_offsets: []const u32,
+    ) Parser {
         const symbols = std.StringHashMap(Symbol).init(allocator);
         const registered_hofs = std.StringHashMap(HofSymbol).init(allocator);
         return .{
             .allocator = allocator,
+            .value_allocator = value_allocator,
             .source = source,
             .tokens = tokens,
             .line_offsets = line_offsets,
@@ -86,15 +94,15 @@ pub const Parser = struct {
         self.local_params.deinit(self.allocator);
     }
 
-    pub fn parseFile(self: *Parser, allocator: std.mem.Allocator) ParseError!FileAst {
+    pub fn parseFile(self: *Parser) ParseError!FileAst {
         try self.populateBuiltins();
         try self.populateHofs();
 
         var consts: std.ArrayList(ConstDef) = .empty;
-        errdefer consts.deinit(allocator);
+        errdefer consts.deinit(self.allocator);
 
-        var statements = try self.collectStatements(allocator);
-        defer statements.deinit(allocator);
+        var statements = try self.collectStatements(self.allocator);
+        defer statements.deinit(self.allocator);
 
         if (statements.items.len == 0) return error.MissingMain;
 
@@ -104,7 +112,7 @@ pub const Parser = struct {
         for (statements.items[0 .. statements.items.len - 1]) |stmt| {
             if (stmt.kind != .const_def) return error.InvalidConst;
             const const_def = try self.parseConst(stmt);
-            try consts.append(allocator, const_def);
+            try consts.append(self.allocator, const_def);
         }
 
         var main_index = main_stmt.start;
@@ -114,7 +122,7 @@ pub const Parser = struct {
         if (main_expr.* != .func) return error.MainMustBeFunction;
 
         return .{
-            .consts = try consts.toOwnedSlice(allocator),
+            .consts = try consts.toOwnedSlice(self.allocator),
             .main = &main_expr.func,
         };
     }
@@ -667,8 +675,8 @@ pub const Parser = struct {
         }
 
         if (rows.items.len == 0) {
-            const data = try self.allocator.alloc(f64, 0);
-            const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, &.{ 0, 0 });
+            const data = try self.value_allocator.allocator().alloc(f64, 0);
+            const meta = types.allocMetadataHeader(self.value_allocator, .Exclusive, &.{ 0, 0 });
             return .{ .array = .{ .data = data, .meta = meta } };
         }
 
@@ -699,11 +707,11 @@ pub const Parser = struct {
             }
         }
 
-        const data = try self.allocator.alloc(f64, items.len * elem_len);
-        const shape = try self.allocator.alloc(usize, first_shape.len + 1);
+        const data = try self.value_allocator.allocator().alloc(f64, items.len * elem_len);
+        const shape = try self.value_allocator.allocator().alloc(usize, first_shape.len + 1);
         shape[0] = items.len;
         @memcpy(shape[1..], first_shape);
-        const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, shape);
+        const meta = types.allocMetadataHeader(self.value_allocator, .Exclusive, shape);
 
         var data_index: usize = 0;
         for (items) |item| {
@@ -724,8 +732,8 @@ pub const Parser = struct {
 
     fn parseRawStringValue(self: *Parser, lexeme: []const u8) ParseError!Value {
         const bytes = if (lexeme.len > 0) lexeme[1..] else lexeme;
-        const data = try self.allocator.alloc(f64, bytes.len);
-        const meta = try types.allocMetadataHeaderWithAllocator(self.allocator, .Exclusive, &.{bytes.len});
+        const data = try self.value_allocator.allocator().alloc(f64, bytes.len);
+        const meta = types.allocMetadataHeader(self.value_allocator, .Exclusive, &.{bytes.len});
         for (bytes, 0..) |byte, i| {
             data[i] = @floatFromInt(byte);
         }

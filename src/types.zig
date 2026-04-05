@@ -86,20 +86,20 @@ pub const Array = struct {
         return self;
     }
 
-    pub fn initWithAllocator(
-        allocator: std.mem.Allocator,
+    pub fn init(
+        allocator: *ReservedBufferAllocator,
         dims: []const usize,
-    ) !Array {
+    ) Array {
         const data_len = prod(dims);
         const shape_offset = MetadataHeader.prefix_bytes();
         const data_offset = array_data_alignment.forward(shape_offset + dims.len * @sizeOf(usize));
         const total_bytes = data_offset + data_len * @sizeOf(f64);
-        const bytes = try allocator.alignedAlloc(u8, array_allocation_alignment, total_bytes);
+        const bytes = allocator.allocator().alignedAlloc(u8, array_allocation_alignment, total_bytes) catch @panic("out of memory");
 
         const meta: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
         meta.* = .{
             .status = CowStatus.Exclusive,
-            .depth = std.math.cast(u8, dims.len) orelse return error.OutOfMemory,
+            .depth = std.math.cast(u8, dims.len) orelse @panic("too many dimensions"),
         };
         @memcpy(meta.shape_mut(), dims);
 
@@ -108,17 +108,6 @@ pub const Array = struct {
             .data = data_ptr[0..data_len],
             .meta = meta,
         };
-    }
-
-    pub fn init(
-        allocator: *ReservedBufferAllocator,
-        dims: []const usize,
-    ) Array {
-        return @call(
-            .always_inline,
-            initWithAllocator,
-            .{ allocator.allocator(), dims },
-        ) catch @panic("out of memory");
     }
 };
 
@@ -130,32 +119,20 @@ fn prod(shape: []const usize) usize {
     return len;
 }
 
-pub fn allocMetadataHeaderWithAllocator(
-    allocator: std.mem.Allocator,
-    status: CowStatus,
-    shape: []const usize,
-) !*MetadataHeader {
-    const total_bytes = MetadataHeader.prefix_bytes() + shape.len * @sizeOf(usize);
-    const bytes = try allocator.alignedAlloc(u8, metadata_shape_alignment, total_bytes);
-    const header: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
-    header.* = .{
-        .status = status,
-        .depth = std.math.cast(u8, shape.len) orelse return error.OutOfMemory,
-    };
-    @memcpy(header.shape_mut(), shape);
-    return header;
-}
-
 pub fn allocMetadataHeader(
     allocator: *ReservedBufferAllocator,
     status: CowStatus,
     shape: []const usize,
-) !*MetadataHeader {
-    return @call(
-        .always_inline,
-        allocMetadataHeaderWithAllocator,
-        .{ allocator.allocator(), status, shape },
-    );
+) *MetadataHeader {
+    const total_bytes = MetadataHeader.prefix_bytes() + shape.len * @sizeOf(usize);
+    const bytes = allocator.allocator().alignedAlloc(u8, metadata_shape_alignment, total_bytes) catch @panic("out of memory");
+    const header: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+    header.* = .{
+        .status = status,
+        .depth = std.math.cast(u8, shape.len) orelse @panic("too many dimensions"),
+    };
+    @memcpy(header.shape_mut(), shape);
+    return header;
 }
 pub const Value = union(enum) {
     scalar: f64,

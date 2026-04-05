@@ -114,7 +114,11 @@ pub const Array = struct {
         allocator: *ReservedBufferAllocator,
         dims: []const usize,
     ) Array {
-        return initWithAllocator(allocator.allocator(), dims) catch @panic("out of memory");
+        return @call(
+            .always_inline,
+            initWithAllocator,
+            .{ allocator.allocator(), dims },
+        ) catch @panic("out of memory");
     }
 };
 

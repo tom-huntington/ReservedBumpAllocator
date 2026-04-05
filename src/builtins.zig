@@ -23,7 +23,7 @@ pub fn add(all: *ReservedBufferAllocator, args: *[2]Value) Value {
                         @panic("not implemented");
                     }
 
-                    var result = types.Array.init(all, .Exclusive, aa.shape());
+                    var result = types.Array.init(all, aa.shape());
 
                     for (aa.data, ba.data, 0..) |lhs, rhs, i| {
                         result.data[i] = lhs + rhs;
@@ -51,7 +51,7 @@ pub fn sq(all: *ReservedBufferAllocator, args: *[1]Value) Value {
             return .{ .scalar = scalar * scalar };
         },
         .array => |array| {
-            var result = types.Array.init(all, .Exclusive, array.shape());
+            var result = types.Array.init(all, array.shape());
 
             for (array.data, 0..) |item, i| {
                 result.data[i] = item * item;
@@ -96,7 +96,7 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         outer_size += 1;
     }
 
-    var result = types.Array.init(all, .Exclusive, &.{ outer_size, inner_size });
+    var result = types.Array.init(all, &.{ outer_size, inner_size });
 
     start = 0;
     var out_index: usize = 0;
@@ -119,7 +119,7 @@ pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
             return .{ .scalar = if (lhs != rhs) 1 else 0 };
         },
         .array => |lhs| {
-            var result = types.Array.init(all, .Exclusive, lhs.shape());
+            var result = types.Array.init(all, lhs.shape());
 
             for (lhs.data, 0..) |item, i| {
                 result.data[i] = if (item != rhs) 1 else 0;

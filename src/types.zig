@@ -88,7 +88,6 @@ pub const Array = struct {
 
     pub fn initWithAllocator(
         allocator: std.mem.Allocator,
-        status: CowStatus,
         dims: []const usize,
     ) !Array {
         const data_len = prod(dims);
@@ -99,7 +98,7 @@ pub const Array = struct {
 
         const meta: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
         meta.* = .{
-            .status = status,
+            .status = CowStatus.Exclusive,
             .depth = std.math.cast(u8, dims.len) orelse return error.OutOfMemory,
         };
         @memcpy(meta.shape_mut(), dims);
@@ -113,10 +112,9 @@ pub const Array = struct {
 
     pub fn init(
         allocator: *ReservedBufferAllocator,
-        status: CowStatus,
         dims: []const usize,
     ) Array {
-        return initWithAllocator(allocator.allocator(), status, dims) catch @panic("out of memory");
+        return initWithAllocator(allocator.allocator(), dims) catch @panic("out of memory");
     }
 };
 

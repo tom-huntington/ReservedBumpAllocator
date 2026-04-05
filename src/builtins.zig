@@ -12,8 +12,7 @@ pub fn add(all: *ReservedBufferAllocator, args: *[2]Value) Value {
         .scalar => |as| {
             switch (b) {
                 .scalar => |bs| {
-                    const val = as.value + bs.value;
-                    return .{ .scalar = .{ .value = val, .is_char = bs.is_char and as.is_char } };
+                    return .{ .scalar = as + bs };
                 },
                 .array => {},
             }
@@ -32,7 +31,7 @@ pub fn add(all: *ReservedBufferAllocator, args: *[2]Value) Value {
                         data[i] = lhs + rhs;
                     }
 
-                    return .{ .array = .{ .data = data, .shape = shape, .is_char = aa.is_char and ba.is_char } };
+                    return .{ .array = .{ .data = data, .shape = shape } };
                 },
                 .scalar => {},
             }
@@ -52,8 +51,7 @@ pub fn sq(all: *ReservedBufferAllocator, args: *[1]Value) Value {
     const a = args[0];
     switch (a) {
         .scalar => |scalar| {
-            const val = scalar.value * scalar.value;
-            return .{ .scalar = .{ .value = val, .is_char = false } };
+            return .{ .scalar = scalar * scalar };
         },
         .array => |array| {
             const data = allocator.alloc(f64, array.data.len) catch @panic("out of memory");
@@ -63,7 +61,7 @@ pub fn sq(all: *ReservedBufferAllocator, args: *[1]Value) Value {
                 data[i] = item * item;
             }
 
-            return .{ .array = .{ .data = data, .shape = shape, .is_char = false } };
+            return .{ .array = .{ .data = data, .shape = shape } };
         },
     }
     @panic("not implemented");
@@ -83,11 +81,11 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         else => @panic("strided expects array as first argument"),
     };
     const inner_size = switch (args[1]) {
-        .scalar => |scalar| expectNonNegativeInteger(scalar.value),
+        .scalar => |scalar| expectNonNegativeInteger(scalar),
         else => @panic("strided expects scalar inner size"),
     };
     const stride = switch (args[2]) {
-        .scalar => |scalar| expectNonNegativeInteger(scalar.value),
+        .scalar => |scalar| expectNonNegativeInteger(scalar),
         else => @panic("strided expects scalar stride"),
     };
 
@@ -115,7 +113,7 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         out_index += inner_size;
     }
 
-    return .{ .array = .{ .data = data, .shape = shape, .is_char = array.is_char } };
+    return .{ .array = .{ .data = data, .shape = shape } };
 }
 
 pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
@@ -127,23 +125,19 @@ pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {
 
     switch (args[0]) {
         .scalar => |lhs| {
-            return .{ .scalar = .{
-                .value = if (lhs.value != rhs.value) 1 else 0,
-                .is_char = false,
-            } };
+            return .{ .scalar = if (lhs != rhs) 1 else 0 };
         },
         .array => |lhs| {
             const data = allocator.alloc(f64, lhs.data.len) catch @panic("out of memory");
             const shape = allocator.dupe(u32, lhs.shape) catch @panic("out of memory");
 
             for (lhs.data, 0..) |item, i| {
-                data[i] = if (item != rhs.value) 1 else 0;
+                data[i] = if (item != rhs) 1 else 0;
             }
 
             return .{ .array = .{
                 .data = data,
                 .shape = shape,
-                .is_char = false,
             } };
         },
     }
@@ -160,8 +154,5 @@ pub fn first(all: *ReservedBufferAllocator, args: *[1]Value) Value {
     if (array.shape.len != 1) @panic("first only supports rank-1 arrays");
     if (array.data.len == 0) @panic("first requires a non-empty array");
 
-    return .{ .scalar = .{
-        .value = array.data[0],
-        .is_char = array.is_char,
-    } };
+    return .{ .scalar = array.data[0] };
 }

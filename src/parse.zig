@@ -639,19 +639,9 @@ pub const Parser = struct {
 
     fn parseLiteralAtomValue(self: *Parser, tok: Token, index: *usize, end_index: usize) ParseError!Value {
         return switch (tok.tag) {
-            .number => .{ .scalar = .{
-                .value = try std.fmt.parseFloat(f64, tok.lexeme),
-                .is_char = false,
-            } },
-            .char_lit => .{ .scalar = .{
-                .value = @floatFromInt(try parseCharToken(tok.lexeme)),
-                .is_char = true,
-            } },
-            .raw_string => .{ .array = .{
-                .data = &.{},
-                .shape = &.{},
-                .is_char = true,
-            } },
+            .number => .{ .scalar = try std.fmt.parseFloat(f64, tok.lexeme) },
+            .char_lit => .{ .scalar = @floatFromInt(try parseCharToken(tok.lexeme)) },
+            .raw_string => try self.parseRawStringValue(tok.lexeme),
             .lbracket => try self.parseBracketLiteralValue(index, end_index),
             else => error.ExpectedValue,
         };
@@ -681,7 +671,7 @@ pub const Parser = struct {
             const shape = try self.allocator.alloc(u32, 2);
             shape[0] = 0;
             shape[1] = 0;
-            return .{ .array = .{ .data = data, .shape = shape, .is_char = false } };
+            return .{ .array = .{ .data = data, .shape = shape } };
         }
 
         return try self.materializeLiteralArray(rows.items);
@@ -699,21 +689,14 @@ pub const Parser = struct {
             .array => |array| array.data.len,
         };
 
-        var is_char = switch (items[0]) {
-            .scalar => |scalar| scalar.is_char,
-            .array => |array| array.is_char,
-        };
-
         for (items[1..]) |item| {
             switch (item) {
-                .scalar => |scalar| {
+                .scalar => {
                     if (first_shape.len != 0) return error.UnexpectedToken;
-                    is_char = is_char and scalar.is_char;
                 },
                 .array => |array| {
                     if (!std.mem.eql(u32, first_shape, array.shape)) return error.UnexpectedToken;
                     if (array.data.len != elem_len) return error.UnexpectedToken;
-                    is_char = is_char and array.is_char;
                 },
             }
         }
@@ -727,7 +710,7 @@ pub const Parser = struct {
         for (items) |item| {
             switch (item) {
                 .scalar => |scalar| {
-                    data[data_index] = scalar.value;
+                    data[data_index] = scalar;
                     data_index += 1;
                 },
                 .array => |array| {
@@ -737,7 +720,18 @@ pub const Parser = struct {
             }
         }
 
-        return .{ .array = .{ .data = data, .shape = shape, .is_char = is_char } };
+        return .{ .array = .{ .data = data, .shape = shape } };
+    }
+
+    fn parseRawStringValue(self: *Parser, lexeme: []const u8) ParseError!Value {
+        const bytes = if (lexeme.len > 0) lexeme[1..] else lexeme;
+        const data = try self.allocator.alloc(f64, bytes.len);
+        const shape = try self.allocator.alloc(u32, 1);
+        shape[0] = @intCast(bytes.len);
+        for (bytes, 0..) |byte, i| {
+            data[i] = @floatFromInt(byte);
+        }
+        return .{ .array = .{ .data = data, .shape = shape } };
     }
 
     fn buildInfix(self: *Parser, tok: Token, left: *Expr, right: *Expr) ParseError!*Expr {

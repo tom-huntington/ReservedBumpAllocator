@@ -94,31 +94,24 @@ fn evalTableFunc(allocator: std.mem.Allocator, table: anytype, args: []const Val
             const shape = allocator.dupe(u32, array.shape) catch @panic("out of memory");
 
             for (array.data, 0..) |item, i| {
-                data[i] = (try evalTableScalar(table, .{
-                    .value = item,
-                    .is_char = array.is_char,
-                })).value;
+                data[i] = try evalTableScalar(table, item);
             }
 
             break :blk .{ .array = .{
                 .data = data,
                 .shape = shape,
-                .is_char = table.lookup.is_char and array.is_char,
             } };
         },
     };
 }
 
-fn evalTableScalar(table: anytype, key: types.Scalar) EvalError!types.Scalar {
+fn evalTableScalar(table: anytype, key: f64) EvalError!f64 {
     const row_count: usize = table.lookup.shape[0];
     for (0..row_count) |row| {
         const row_offset = row * 2;
         const candidate = table.lookup.data[row_offset];
-        if (candidate == key.value) {
-            return .{
-                .value = table.lookup.data[row_offset + 1],
-                .is_char = table.lookup.is_char,
-            };
+        if (candidate == key) {
+            return table.lookup.data[row_offset + 1];
         }
     }
 
@@ -306,21 +299,14 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
         .array => |array| array.data.len,
     };
 
-    var is_char = switch (items[0]) {
-        .scalar => |scalar| scalar.is_char,
-        .array => |array| array.is_char,
-    };
-
     for (items[1..]) |item| {
         switch (item) {
             .scalar => {
                 if (first_shape.len != 0) return error.UnsupportedValueKind;
-                is_char = is_char and item.scalar.is_char;
             },
             .array => |array| {
                 if (!std.mem.eql(u32, first_shape, array.shape)) return error.UnsupportedValueKind;
                 if (array.data.len != elem_len) return error.UnsupportedValueKind;
-                is_char = is_char and array.is_char;
             },
         }
     }
@@ -334,7 +320,7 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
     for (items) |item| {
         switch (item) {
             .scalar => |scalar| {
-                data[data_index] = scalar.value;
+                data[data_index] = scalar;
                 data_index += 1;
             },
             .array => |array| {
@@ -344,5 +330,5 @@ fn materializeArrayStrand(allocator: std.mem.Allocator, items: []const Value) Ev
         }
     }
 
-    return .{ .array = .{ .data = data, .shape = shape, .is_char = is_char } };
+    return .{ .array = .{ .data = data, .shape = shape } };
 }

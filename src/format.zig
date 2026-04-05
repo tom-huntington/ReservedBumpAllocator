@@ -37,13 +37,8 @@ pub fn writeValue(writer: *std.Io.Writer, allocator: Allocator, value: Value) an
 fn fmtValue(allocator: Allocator, value: Value, params: GridFmtParams) anyerror!Grid {
     if (params.depth > 100) return gridFromText(allocator, "...");
     return switch (value) {
-        .scalar => |scalar| {
-            if (scalar.is_char) {
-                return gridFromCharScalar(allocator, scalar.value);
-            }
-            return gridFromOwnedRow(allocator, try formatNumber(allocator, scalar.value));
-        },
-        .array => |array| try fmtArrayValue(allocator, array.data, array.shape, array.is_char, params),
+        .scalar => |scalar| gridFromOwnedRow(allocator, try formatNumber(allocator, scalar)),
+        .array => |array| try fmtArrayValue(allocator, array.data, array.shape, params),
     };
 }
 
@@ -51,29 +46,28 @@ fn fmtArrayValue(
     allocator: Allocator,
     data: []const f64,
     shape: []const u32,
-    is_char: bool,
     params: GridFmtParams,
 ) anyerror!Grid {
     if (shape.len == 0) {
-        if (data.len == 0) return gridFromText(allocator, "\"\"");
-        const scalar: Value = .{ .scalar = .{ .value = data[0], .is_char = is_char } };
+        if (data.len == 0) return gridFromText(allocator, "[]");
+        const scalar: Value = .{ .scalar = data[0] };
         return fmtValue(allocator, scalar, params);
     }
 
     if (requiresSummary(shape, data.len)) {
-        return gridFromOwnedRow(allocator, try summaryRow(allocator, data, shape, is_char));
+        return gridFromOwnedRow(allocator, try summaryRow(allocator, data, shape));
     }
 
     var metagrid = MetaGrid.init(allocator);
     defer deinitMetaGrid(&metagrid);
 
-    try fmtArray(allocator, data, shape, is_char, .{
+    try fmtArray(allocator, data, shape, .{
         .depth = params.depth,
         .parent_rank = shape.len,
     }, &metagrid);
 
-    var grid = try synthesizeGrid(allocator, &metagrid, if (is_char) .left else .decimal);
-    try outlineGrid(allocator, &grid, shape.len, is_char);
+    var grid = try synthesizeGrid(allocator, &metagrid, .decimal);
+    try outlineGrid(allocator, &grid, shape.len);
     return grid;
 }
 
@@ -81,12 +75,11 @@ fn fmtArray(
     allocator: Allocator,
     data: []const f64,
     shape: []const u32,
-    is_char: bool,
     params: GridFmtParams,
     metagrid: *MetaGrid,
 ) anyerror!void {
     if (shape.len == 0) {
-        const scalar: Value = .{ .scalar = .{ .value = data[0], .is_char = is_char } };
+        const scalar: Value = .{ .scalar = data[0] };
         var meta_row = MetaRow.init(allocator);
         try meta_row.append(try fmtValue(allocator, scalar, params));
         try metagrid.append(meta_row);
@@ -102,13 +95,9 @@ fn fmtArray(
 
     if (shape.len == 1) {
         var meta_row = MetaRow.init(allocator);
-        if (is_char) {
-            try meta_row.append(try gridFromOwnedRow(allocator, try formatCharVector(allocator, data)));
-        } else {
-            for (data) |elem| {
-                const scalar: Value = .{ .scalar = .{ .value = elem, .is_char = false } };
-                try meta_row.append(try fmtValue(allocator, scalar, params));
-            }
+        for (data) |elem| {
+            const scalar: Value = .{ .scalar = elem };
+            try meta_row.append(try fmtValue(allocator, scalar, params));
         }
         try metagrid.append(meta_row);
         return;
@@ -133,7 +122,7 @@ fn fmtArray(
 
         const before = metagrid.items.len;
         const start = i * cell_size;
-        try fmtArray(allocator, data[start .. start + cell_size], child_shape, is_char, params, metagrid);
+        try fmtArray(allocator, data[start .. start + cell_size], child_shape, params, metagrid);
 
         if (i > 0 and shape.len % 2 == 1) {
             var split_rows = Managed(MetaRow).init(allocator);
@@ -220,14 +209,12 @@ fn synthesizeGrid(allocator: Allocator, metagrid: *MetaGrid, alignment: ElemAlig
     return result;
 }
 
-fn outlineGrid(allocator: Allocator, grid: *Grid, rank: usize, is_char: bool) !void {
+fn outlineGrid(allocator: Allocator, grid: *Grid, rank: usize) !void {
     if (grid.items.len == 0) return;
 
     if (rank == 1 and grid.items.len == 1) {
-        const left: u8 = if (is_char) '"' else '[';
-        const right: u8 = if (is_char) '"' else ']';
-        try grid.items[0].insert(0, left);
-        try grid.items[0].append(right);
+        try grid.items[0].insert(0, '[');
+        try grid.items[0].append(']');
         return;
     }
 
@@ -260,55 +247,40 @@ fn requiresSummary(shape: []const u32, elem_count: usize) bool {
     return elem_count > 3600 or shape.len > 8;
 }
 
-fn summaryRow(allocator: Allocator, data: []const f64, shape: []const u32, is_char: bool) ![]u8 {
+fn summaryRow(allocator: Allocator, data: []const f64, shape: []const u32) ![]u8 {
     var out = Row.init(allocator);
     errdefer out.deinit();
-    try appendShape(&out, shape, is_char);
+    try appendShape(&out, shape);
     try out.appendSlice(": ");
-    if (is_char) {
-        try out.appendSlice("string");
-    } else {
-        var min = data[0];
-        var max = data[0];
-        var mean: f64 = 0;
-        for (data, 0..) |elem, i| {
-            min = @min(min, elem);
-            max = @max(max, elem);
-            mean += (elem - mean) / @as(f64, @floatFromInt(i + 1));
-        }
-        const min_s = try formatNumber(allocator, min);
-        defer allocator.free(min_s);
-        const max_s = try formatNumber(allocator, max);
-        defer allocator.free(max_s);
-        const mean_s = try formatNumber(allocator, mean);
-        defer allocator.free(mean_s);
-        try out.appendSlice(min_s);
-        try out.append('-');
-        try out.appendSlice(max_s);
-        try out.appendSlice(" u");
-        try out.appendSlice(mean_s);
+    var min = data[0];
+    var max = data[0];
+    var mean: f64 = 0;
+    for (data, 0..) |elem, i| {
+        min = @min(min, elem);
+        max = @max(max, elem);
+        mean += (elem - mean) / @as(f64, @floatFromInt(i + 1));
     }
+    const min_s = try formatNumber(allocator, min);
+    defer allocator.free(min_s);
+    const max_s = try formatNumber(allocator, max);
+    defer allocator.free(max_s);
+    const mean_s = try formatNumber(allocator, mean);
+    defer allocator.free(mean_s);
+    try out.appendSlice(min_s);
+    try out.append('-');
+    try out.appendSlice(max_s);
+    try out.appendSlice(" u");
+    try out.appendSlice(mean_s);
     return out.toOwnedSlice();
 }
 
-fn appendShape(out: *Row, shape: []const u32, is_char: bool) !void {
+fn appendShape(out: *Row, shape: []const u32) !void {
     for (shape, 0..) |dim, i| {
         if (i > 0) try out.appendSlice("x");
         try out.writer().print("{}", .{dim});
     }
     if (shape.len > 0) try out.append(' ');
-    try out.appendSlice(if (is_char) "char" else "num");
-}
-
-fn formatCharVector(allocator: Allocator, data: []const f64) ![]u8 {
-    var out = Row.init(allocator);
-    errdefer out.deinit();
-    for (data) |elem| {
-        const inner = try formatCharInner(allocator, elem);
-        defer allocator.free(inner);
-        try out.appendSlice(inner);
-    }
-    return out.toOwnedSlice();
+    try out.appendSlice("num");
 }
 
 fn gridFromText(allocator: Allocator, text: []const u8) !Grid {
@@ -324,38 +296,6 @@ fn gridFromOwnedRow(allocator: Allocator, row_bytes: []u8) !Grid {
     var grid = Grid.init(allocator);
     try grid.append(row);
     return grid;
-}
-
-fn gridFromCharScalar(allocator: Allocator, value: f64) !Grid {
-    const inner = try formatCharInner(allocator, value);
-    defer allocator.free(inner);
-    var row = Row.init(allocator);
-    errdefer row.deinit();
-    try row.append('@');
-    try row.appendSlice(inner);
-    var grid = Grid.init(allocator);
-    try grid.append(row);
-    return grid;
-}
-
-fn formatCharInner(allocator: Allocator, value: f64) ![]u8 {
-    if (!std.math.isFinite(value) or value < 0 or value > 255) {
-        return allocator.dupe(u8, "?");
-    }
-    const ch: u8 = @intFromFloat(value);
-    return switch (ch) {
-        ' ' => allocator.dupe(u8, "\\s"),
-        '\n' => allocator.dupe(u8, "\\n"),
-        '\r' => allocator.dupe(u8, "\\r"),
-        '\t' => allocator.dupe(u8, "\\t"),
-        '\\' => allocator.dupe(u8, "\\\\"),
-        '"' => allocator.dupe(u8, "\\\""),
-        '\'' => allocator.dupe(u8, "'"),
-        else => if (std.ascii.isPrint(ch))
-            allocator.dupe(u8, &.{ch})
-        else
-            std.fmt.allocPrint(allocator, "\\x{x:0>2}", .{ch}),
-    };
 }
 
 fn formatNumber(allocator: Allocator, value: f64) ![]u8 {

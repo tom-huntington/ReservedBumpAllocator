@@ -24,7 +24,6 @@ fn bytesToArray(allocator: std.mem.Allocator, bytes: []const u8) !types.Array {
     return .{
         .data = data,
         .shape = shape,
-        .is_char = true,
     };
 }
 
@@ -87,8 +86,8 @@ pub fn main() !void {
     var arg1_data = [_]f64{ 4, 5 };
     var arg_shape = [_]u32{8};
     const args = [_]types.Value{
-        .{ .array = .{ .data = arg0_data[0..], .shape = arg_shape[0..], .is_char = false } },
-        .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..], .is_char = false } },
+        .{ .array = .{ .data = arg0_data[0..], .shape = arg_shape[0..] } },
+        .{ .array = .{ .data = arg1_data[0..], .shape = arg_shape[0..] } },
         .{ .array = input_array },
     };
     const result = switch (file_ast.main.arity) {

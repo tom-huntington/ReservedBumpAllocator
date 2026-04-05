@@ -32,10 +32,9 @@ pub const Token = struct {
     lexeme: []const u8,
 };
 
-pub const Array = struct { data: []f64, shape: []u32, is_char: bool };
-pub const Scalar = struct { value: f64, is_char: bool };
+pub const Array = struct { data: []f64, shape: []u32 };
 pub const Value = union(enum) {
-    scalar: Scalar,
+    scalar: f64,
     array: Array,
 };
 

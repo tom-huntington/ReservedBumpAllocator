@@ -24,16 +24,13 @@ pub fn reduce(all: *ReservedBufferAllocator, args: *[1]Value, fn_arg: Expr.FuncE
     if (array.data.len == 0) @panic("reduce requires a non-empty array");
 
     var acc: Value = .{
-        .scalar = .{
-            .value = array.data[0],
-            .is_char = array.is_char,
-        },
+        .scalar = array.data[0],
     };
 
     for (array.data[1..]) |item| {
         acc = @import("eval.zig").evalFunc(all, &fn_arg, &.{
             acc,
-            .{ .scalar = .{ .value = item, .is_char = array.is_char } },
+            .{ .scalar = item },
         }) catch @panic("reduce function evaluation failed");
     }
 

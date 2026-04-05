@@ -11,7 +11,7 @@ pub const ReservedBumpAllocator = struct {
     base: [*]u8,
     reserved_len: usize,
     committed_len: usize,
-    end_index: usize,
+    sentinel: usize,
     page_size: usize,
 
     pub const Error = error{
@@ -49,7 +49,7 @@ pub const ReservedBumpAllocator = struct {
             .base = @ptrCast(raw_ptr),
             .reserved_len = reserved_len_aligned,
             .committed_len = 0,
-            .end_index = 0,
+            .sentinel = 0,
             .page_size = page_size,
         };
     }
@@ -61,7 +61,7 @@ pub const ReservedBumpAllocator = struct {
             .base = buffer.ptr,
             .reserved_len = buffer.len,
             .committed_len = buffer.len,
-            .end_index = 0,
+            .sentinel = 0,
             .page_size = 0,
         };
     }
@@ -90,7 +90,7 @@ pub const ReservedBumpAllocator = struct {
     }
 
     pub fn reset(self: *ReservedBumpAllocator) void {
-        self.end_index = 0;
+        self.sentinel = 0;
     }
 
     pub fn committedBytes(self: *const ReservedBumpAllocator) usize {
@@ -110,13 +110,13 @@ pub const ReservedBumpAllocator = struct {
     }
 
     pub fn isLastAllocation(self: *const ReservedBumpAllocator, buf: []u8) bool {
-        return @intFromPtr(buf.ptr) + buf.len == @intFromPtr(self.base) + self.end_index;
+        return @intFromPtr(buf.ptr) + buf.len == @intFromPtr(self.base) + self.sentinel;
     }
 
-    fn ensureCommitted(self: *ReservedBumpAllocator, end_index: usize) Error!void {
+    fn ensureCommitted(self: *ReservedBumpAllocator, sentinel: usize) Error!void {
         if (self.page_size == 0 or self.committed_len == self.reserved_len) return;
 
-        const needed = mem.alignForward(usize, end_index, self.page_size);
+        const needed = mem.alignForward(usize, sentinel, self.page_size);
         if (needed <= self.committed_len) return;
         if (needed > self.reserved_len) return error.OutOfMemory;
 
@@ -145,13 +145,13 @@ pub const ReservedBumpAllocator = struct {
         _ = ra;
 
         const ptr_align = alignment.toByteUnits();
-        const adjust_off = mem.alignPointerOffset(self.base + self.end_index, ptr_align) orelse return null;
-        const adjusted_index = self.end_index + adjust_off;
-        const new_end_index = adjusted_index + n;
-        if (new_end_index > self.reserved_len) return null;
+        const adjust_off = mem.alignPointerOffset(self.base + self.sentinel, ptr_align) orelse return null;
+        const adjusted_index = self.sentinel + adjust_off;
+        const new_sentinel = adjusted_index + n;
+        if (new_sentinel > self.reserved_len) return null;
 
-        self.ensureCommitted(new_end_index) catch return null;
-        self.end_index = new_end_index;
+        self.ensureCommitted(new_sentinel) catch return null;
+        self.sentinel = new_sentinel;
         return self.base + adjusted_index;
     }
 
@@ -172,15 +172,15 @@ pub const ReservedBumpAllocator = struct {
         }
 
         if (new_size <= buf.len) {
-            self.end_index -= buf.len - new_size;
+            self.sentinel -= buf.len - new_size;
             return true;
         }
 
-        const new_end_index = self.end_index + (new_size - buf.len);
-        if (new_end_index > self.reserved_len) return false;
+        const new_sentinel = self.sentinel + (new_size - buf.len);
+        if (new_sentinel > self.reserved_len) return false;
 
-        self.ensureCommitted(new_end_index) catch return false;
-        self.end_index = new_end_index;
+        self.ensureCommitted(new_sentinel) catch return false;
+        self.sentinel = new_sentinel;
         return true;
     }
 
@@ -206,7 +206,7 @@ pub const ReservedBumpAllocator = struct {
         assert(@inComptime() or self.ownsSlice(buf));
 
         if (self.isLastAllocation(buf)) {
-            self.end_index -= buf.len;
+            self.sentinel -= buf.len;
         }
     }
 };

@@ -70,14 +70,6 @@ pub const MetadataHeader = struct {
     }
 };
 
-pub fn InitMetadata(
-    allocator: *ReservedBufferAllocator,
-    status: CowStatus,
-    shape: []const usize,
-) *MetadataHeader {
-    return MetadataHeader.initWithShape(allocator, status, shape);
-}
-
 const metadata_header_alignment = std.mem.Alignment.of(MetadataHeader);
 const array_data_alignment = std.mem.Alignment.of(f64);
 const array_allocation_alignment = std.mem.Alignment.fromByteUnits(@max(@alignOf(MetadataHeader), @alignOf(f64)));

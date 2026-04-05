@@ -75,7 +75,6 @@ fn expectNonNegativeInteger(value: f64) usize {
 }
 
 pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
-    const allocator = all.allocator();
     const array = switch (args[0]) {
         .array => |array| array,
         else => @panic("strided expects array as first argument"),
@@ -101,17 +100,16 @@ pub fn strided(all: *ReservedBufferAllocator, args: *[3]Value) Value {
         outer_size += 1;
     }
 
-    const data = allocator.alloc(f64, outer_size * inner_size) catch @panic("out of memory");
-    const meta = types.allocMetadataHeaderWithAllocator(allocator, .Exclusive, &.{ outer_size, inner_size }) catch @panic("out of memory");
+    var result = types.Array.init(all, .Exclusive, &.{ outer_size, inner_size });
 
     start = 0;
     var out_index: usize = 0;
     while (start + inner_size <= array.data.len) : (start += step) {
-        @memcpy(data[out_index .. out_index + inner_size], array.data[start .. start + inner_size]);
+        @memcpy(result.data[out_index .. out_index + inner_size], array.data[start .. start + inner_size]);
         out_index += inner_size;
     }
 
-    return .{ .array = .{ .data = data, .meta = meta } };
+    return .{ .array = result };
 }
 
 pub fn not_eq(all: *ReservedBufferAllocator, args: *[2]Value) Value {

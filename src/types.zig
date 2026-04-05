@@ -60,6 +60,10 @@ pub const MetadataHeader = struct {
         return ptr[0..self.depth];
     }
 };
+const metadata_header_alignment = std.mem.Alignment.of(MetadataHeader);
+const array_data_alignment = std.mem.Alignment.of(f64);
+const array_allocation_alignment = std.mem.Alignment.fromByteUnits(@max(@alignOf(MetadataHeader), @alignOf(f64)));
+
 pub const Array = struct {
     data: []f64,
     meta: *MetadataHeader,
@@ -81,7 +85,48 @@ pub const Array = struct {
         self.meta.status = CowStatus.Shared;
         return self;
     }
+
+    pub fn initWithAllocator(
+        allocator: std.mem.Allocator,
+        status: CowStatus,
+        dims: []const usize,
+    ) !Array {
+        const data_len = prod(dims);
+        const shape_offset = MetadataHeader.prefix_bytes();
+        const data_offset = array_data_alignment.forward(shape_offset + dims.len * @sizeOf(usize));
+        const total_bytes = data_offset + data_len * @sizeOf(f64);
+        const bytes = try allocator.alignedAlloc(u8, array_allocation_alignment, total_bytes);
+
+        const meta: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+        meta.* = .{
+            .status = status,
+            .depth = std.math.cast(u8, dims.len) orelse return error.OutOfMemory,
+        };
+        @memcpy(meta.shape_mut(), dims);
+
+        const data_ptr: [*]f64 = @ptrCast(@alignCast(bytes.ptr + data_offset));
+        return .{
+            .data = data_ptr[0..data_len],
+            .meta = meta,
+        };
+    }
+
+    pub fn init(
+        allocator: *ReservedBufferAllocator,
+        status: CowStatus,
+        dims: []const usize,
+    ) Array {
+        return initWithAllocator(allocator.allocator(), status, dims) catch @panic("out of memory");
+    }
 };
+
+fn prod(shape: []const usize) usize {
+    var len: usize = 1;
+    for (shape) |dim| {
+        len = len * dim;
+    }
+    return len;
+}
 
 pub fn allocMetadataHeaderWithAllocator(
     allocator: std.mem.Allocator,

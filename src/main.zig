@@ -1,93 +1,34 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const quiver = @import("quiver");
-const stringprint = @import("stringprint.zig");
-const parse = @import("parse.zig");
-const lex = @import("lex.zig");
-const eval = @import("eval.zig");
-const types = @import("types.zig");
-const format = @import("format.zig");
-const ReservedBumpAllocator = @import("ReservedBumpAllocator").ReservedBumpAllocator;
+const lib = @import("ReservedBumpAllocator");
 
-fn bytesToArray(allocator: *ReservedBumpAllocator, bytes: []const u8) !types.Array {
-    const data = try allocator.allocator().alloc(f64, bytes.len);
-    const meta = types.Metadata.initWithShape(allocator, .Exclusive, &.{bytes.len});
-
-    for (bytes, 0..) |byte, i| {
-        data[i] = @floatFromInt(byte);
-    }
-
-    return .{
-        .data = data,
-        .meta = meta,
-    };
-}
-
-pub const std_options: std.Options = .{
-    .fmt_max_depth = 64, // Default is usually 16
-};
+const TiB: usize = 1024 * 1024 * 1024 * 1024;
+const GiB: usize = 1024 * 1024 * 1024;
 
 pub fn main() !void {
-    if (builtin.os.tag == .windows) {
-        _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
-    }
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
 
-    var ast_alloc = try ReservedBumpAllocator.init(1024 * 1024);
-    defer ast_alloc.deinit();
-    var runtime_alloc = try ReservedBumpAllocator.init(1024 * 1024);
-    defer runtime_alloc.deinit();
+    var stdin_buffer: [1024]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
 
-    const wrap = struct {
-        v: []const u8,
-    };
-    const a = wrap{ .v = "hello" };
-    stringprint.printfmt("a: {}\n", .{a});
-    const input =
-        \\L68
-        \\L30
-        \\R48
-        \\L5
-        \\R60
-        \\L55
-        \\L1
-        \\L99
-        \\R14
-        \\L82
-    ;
-    const input_array = try bytesToArray(&runtime_alloc, input);
-    std.debug.print("input_array: {}\n", .{input_array});
+    var allocator_impl = try lib.ReservedBumpAllocator.init(TiB);
+    defer allocator_impl.deinit();
 
-    //std.debug.print("{f}", .{std.zig.fmtString(input)});
-    const source =
-        \\  not_eq,@\n )s partition first
-    ;
-    std.debug.print("soure: {s}\n", .{source});
+    const allocator = allocator_impl.allocator();
+    const memory = try allocator.alloc(u8, GiB);
 
-    var lexed = try lex.lex(&ast_alloc, source);
-    stringprint.printfmt("tokens: {}\n", .{lexed.tokens});
-    stringprint.printfmt("line_offsets: {}\n", .{lexed.line_offsets});
+    @memset(memory, 0xA5);
 
-    defer lexed.deinit(&ast_alloc);
+    try stdout.print(
+        "Reserved {d} bytes, committed {d} bytes, touched {d} bytes.\nPress Enter to exit.\n",
+        .{
+            allocator_impl.reservedBytes(),
+            allocator_impl.committedBytes(),
+            memory.len,
+        },
+    );
+    try stdout.flush();
 
-    var parser = parse.Parser.init(&ast_alloc, &runtime_alloc, source, lexed.tokens.items, lexed.line_offsets.items);
-    defer parser.deinit();
-    const file_ast: parse.FileAst = try parser.parseFile();
-    stringprint.printfmt("main: {}\n", .{file_ast.main});
-
-    var arg0_data = [_]f64{ 1, 2 };
-    var arg1_data = [_]f64{ 4, 5 };
-    const arg_meta = types.Metadata.initWithShape(&runtime_alloc, .Exclusive, &.{8});
-    const args = [_]types.Value{
-        .{ .array = .{ .data = arg0_data[0..], .meta = arg_meta } },
-        .{ .array = .{ .data = arg1_data[0..], .meta = arg_meta } },
-        .{ .array = input_array },
-    };
-    const result = switch (file_ast.main.arity) {
-        2 => return error.ArityMismatch, //try eval.evalFunc(&runtime_alloc, file_ast.main, args[0..2]),
-        1 => try eval.evalFunc(&runtime_alloc, file_ast.main, args[2..3]),
-        else => return error.ArityMismatch,
-    };
-    const rendered = try format.valueString(ast_alloc.allocator(), result, true);
-    std.debug.print("{s}\n", .{rendered});
-    std.debug.print("{}\n", .{result});
+    _ = try stdin_reader.interface.takeDelimiter('\n');
 }

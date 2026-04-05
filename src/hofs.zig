@@ -164,7 +164,7 @@ fn makeGroupView(
     const slice_end = (start + len) * row_size;
     return .{
         .data = array.data[slice_start..slice_end],
-        .meta = types.MetadataHeader.initWithShape(all, .Shared, group_shape),
+        .meta = types.Metadata.initWithShape(all, .Shared, group_shape),
     };
 }
 

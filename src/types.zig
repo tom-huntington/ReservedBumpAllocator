@@ -38,7 +38,7 @@ pub const CowStatus = enum {
     Exclusive,
     Shared,
 };
-pub const MetadataHeader = struct {
+pub const Metadata = struct {
     status: CowStatus,
     shape: []usize,
 
@@ -46,11 +46,11 @@ pub const MetadataHeader = struct {
         allocator: *ReservedBufferAllocator,
         status: CowStatus,
         depth: usize,
-    ) *MetadataHeader {
-        const shape_offset = metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
+    ) *Metadata {
+        const shape_offset = metadata_shape_alignment.forward(@sizeOf(Metadata));
         const total_bytes = shape_offset + depth * @sizeOf(usize);
         const bytes = allocator.allocator().alignedAlloc(u8, metadata_header_alignment, total_bytes) catch @panic("out of memory");
-        const header: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+        const header: *Metadata = @ptrCast(@alignCast(bytes.ptr));
         const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         header.* = .{
             .status = status,
@@ -63,20 +63,20 @@ pub const MetadataHeader = struct {
         allocator: *ReservedBufferAllocator,
         status: CowStatus,
         shape: []const usize, // copied into inline storage after the header
-    ) *MetadataHeader {
+    ) *Metadata {
         const header = initWithDepth(allocator, status, shape.len);
         @memcpy(header.shape, shape);
         return header;
     }
 };
 
-const metadata_header_alignment = std.mem.Alignment.of(MetadataHeader);
+const metadata_header_alignment = std.mem.Alignment.of(Metadata);
 const array_data_alignment = std.mem.Alignment.of(f64);
-const array_allocation_alignment = std.mem.Alignment.fromByteUnits(@max(@alignOf(MetadataHeader), @alignOf(f64)));
+const array_allocation_alignment = std.mem.Alignment.fromByteUnits(@max(@alignOf(Metadata), @alignOf(f64)));
 
 pub const Array = struct {
     data: []f64,
-    meta: *MetadataHeader,
+    meta: *Metadata,
 
     pub fn shape(self: Array) []const usize {
         return self.meta.shape;
@@ -110,12 +110,12 @@ pub const Array = struct {
         depth: usize,
         size: usize,
     ) Array {
-        const shape_offset = metadata_shape_alignment.forward(@sizeOf(MetadataHeader));
+        const shape_offset = metadata_shape_alignment.forward(@sizeOf(Metadata));
         const data_offset = array_data_alignment.forward(shape_offset + depth * @sizeOf(usize));
         const total_bytes = data_offset + size * @sizeOf(f64);
         const bytes = allocator.allocator().alignedAlloc(u8, array_allocation_alignment, total_bytes) catch @panic("out of memory");
 
-        const meta: *MetadataHeader = @ptrCast(@alignCast(bytes.ptr));
+        const meta: *Metadata = @ptrCast(@alignCast(bytes.ptr));
         const shape_ptr: [*]usize = @ptrCast(@alignCast(bytes.ptr + shape_offset));
         meta.* = .{
             .status = CowStatus.Exclusive,
